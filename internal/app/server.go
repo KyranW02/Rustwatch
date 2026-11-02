@@ -610,11 +610,11 @@ func (a *App) Handler() http.Handler {
 		return nil, a.Track(tp)
 	})
 	post("/api/tracker/untrack", func(r *http.Request) (any, error) {
-		var b struct{ BMID, Name string }
+		var b struct{ BMID, Name, SteamID string }
 		if err := decode(r, &b); err != nil {
 			return nil, err
 		}
-		a.Untrack(b.BMID, b.Name)
+		a.Untrack(b.BMID, b.Name, b.SteamID)
 		return nil, nil
 	})
 	post("/api/tracker/link", func(r *http.Request) (any, error) {

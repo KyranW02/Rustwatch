@@ -95,6 +95,7 @@ type Session struct {
 
 type TrackedPlayer struct {
 	BMID     string    `json:"bmId"`
+	SteamID  string    `json:"steamId"` // followed by Steam presence when set
 	Name     string    `json:"name"`
 	Tag      string    `json:"tag"`
 	Color    string    `json:"color"`

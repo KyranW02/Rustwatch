@@ -45,6 +45,12 @@ type Tracker struct {
 	total      int    // players the server says are online
 	queryAddr  string
 	key        string
+
+	steamOn     bool                     // a Steam key is set: Steam-linked players are followed by Steam presence
+	steam       map[string]steamPresence // steamId -> latest presence
+	steamErr    string
+	herePorts   map[int]bool // extra game ports confirmed to be this server
+	portChecked map[int]bool
 }
 
 type OnlinePlayer struct {
@@ -64,7 +70,8 @@ type Activity struct {
 
 func newTracker(a *App) *Tracker {
 	return &Tracker{a: a, pokeCh: make(chan struct{}, 1), http: &http.Client{Timeout: 25 * time.Second},
-		baseURL: "https://api.battlemetrics.com", online: map[string]*OnlinePlayer{}, first: true, status: "idle"}
+		baseURL: "https://api.battlemetrics.com", online: map[string]*OnlinePlayer{}, first: true, status: "idle",
+		steam: map[string]steamPresence{}, herePorts: map[int]bool{}, portChecked: map[int]bool{}}
 }
 
 func (t *Tracker) poke() {
@@ -238,11 +245,30 @@ func (t *Tracker) poll() {
 		t.serverID, t.serverName, t.queryAddr = sc.BMServerID, "", sc.QueryAddr
 		t.status, t.lastPoll = "loading the player list…", time.Time{}
 		t.censored, t.shown, t.total = false, 0, 0
+		t.steam, t.steamErr, t.herePorts, t.portChecked = map[string]steamPresence{}, "", map[int]bool{}, map[int]bool{}
 	}
+	steamKey := a.cfg.Settings.SteamAPIKey
+	t.steamOn = steamKey != ""
+	var steamIDs []string
+	for _, tp := range sc.Tracked {
+		if tp.SteamID != "" {
+			steamIDs = append(steamIDs, tp.SteamID)
+		}
+	}
+	sa := t.addrsLocked(sc, name)
 	a.mu.Unlock()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Second)
 	defer cancel()
+	var pres map[string]steamPresence
+	var serr error
+	steamDone := make(chan struct{})
+	go func() {
+		defer close(steamDone)
+		if steamKey != "" && len(steamIDs) > 0 {
+			pres, serr = t.steamPoll(ctx, sc, steamKey, steamIDs, sa)
+		}
+	}()
 	var cur map[string]seenPlayer
 	var err error
 	if useBM {
@@ -250,7 +276,8 @@ func (t *Tracker) poll() {
 	} else {
 		cur, err = t.fetchDirect(ctx, sc, name, ip)
 	}
-	if err != nil {
+	<-steamDone
+	if err != nil && pres == nil {
 		t.setStatus(err.Error())
 		return
 	}
@@ -262,7 +289,33 @@ func (t *Tracker) poll() {
 	if a.srv != sc || t.source != source {
 		return
 	}
+	if err != nil {
+		// the player list failed but Steam answered: keep the list as it was, update Steam players
+		cur = map[string]seenPlayer{}
+		for k, p := range t.online {
+			if !strings.HasPrefix(k, "s:") {
+				cur[k] = seenPlayer{Name: p.Name}
+			}
+		}
+	}
+	t.steamErr = ""
+	if serr != nil {
+		t.steamErr = serr.Error()
+		for k, p := range t.online { // Steam hiccup: leave Steam-linked players as they were
+			if strings.HasPrefix(k, "s:") {
+				cur[k] = seenPlayer{Name: p.Name}
+			}
+		}
+	} else if pres != nil {
+		for id, p := range pres {
+			t.steam[id] = p
+		}
+		t.mergeSteamLocked(sc, cur, pres)
+	}
 	t.apply(sc, cur)
+	if err != nil {
+		t.status = err.Error()
+	}
 }
 
 func (t *Tracker) fetchBM(ctx context.Context, sc *ServerConfig, name, ip string) (map[string]seenPlayer, error) {
@@ -350,7 +403,7 @@ func (t *Tracker) fetchDirect(ctx context.Context, sc *ServerConfig, name, ip st
 	list, err := a2s.QueryPlayerList(addr, 4*time.Second)
 	players := list.Players
 	if errors.Is(err, a2s.ErrNoPlayerList) {
-		return nil, fmt.Errorf("this server answers server-browser queries but won't share its player list (%d online) — common on servers behind DDoS protection. Direct tracking can't see names here; a BattleMetrics API key in Settings is the alternative", info.Players)
+		return nil, fmt.Errorf("this server answers server-browser queries but won't share its player list (%d online) — common on servers behind DDoS protection. Players tracked by Steam profile are still followed", info.Players)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("the server's player list didn't come through (%v) — retrying on the next refresh", err)
@@ -382,7 +435,7 @@ func (t *Tracker) fetchDirect(ctx context.Context, sc *ServerConfig, name, ip st
 	t.shown, t.total = len(cur), max(info.Players, list.Declared)
 	a.mu.Unlock()
 	if len(players) == 0 && info.Players > 0 {
-		return nil, fmt.Errorf("this server hides its player list (%d players online), so direct tracking can't see names here — a BattleMetrics API key in Settings is the alternative", info.Players)
+		return nil, fmt.Errorf("this server hides its player list (%d players online), so names can't be matched here — players tracked by Steam profile are still followed", info.Players)
 	}
 	return cur, nil
 }
@@ -473,6 +526,10 @@ func (t *Tracker) apply(sc *ServerConfig, cur map[string]seenPlayer) {
 	tracked := map[string]*TrackedPlayer{}
 	for i := range sc.Tracked {
 		tp := &sc.Tracked[i]
+		if tp.SteamID != "" && t.steamOn {
+			tracked["s:"+tp.SteamID] = tp
+			continue
+		}
 		if direct {
 			if tp.Name != "" && !strings.HasPrefix(tp.Name, "BM #") {
 				tracked[directKey(tp.Name)] = tp
@@ -592,6 +649,9 @@ func (t *Tracker) onlineCount() int { return len(t.online) }
 
 // keyFor is the key a tracked player has in t.online for the current source.
 func (t *Tracker) keyFor(tp *TrackedPlayer) string {
+	if tp.SteamID != "" && t.steamOn {
+		return "s:" + tp.SteamID
+	}
 	if t.source == "direct" {
 		return directKey(tp.Name)
 	}
@@ -637,12 +697,16 @@ type TrackedView struct {
 	LastSeenAgo string `json:"lastSeenAgo"`
 	Playtime24  string `json:"playtime24h"`
 	Playtime7d  string `json:"playtime7d"`
+	Presence    string `json:"presence"`  // Steam status for Steam-linked players
+	SteamName   string `json:"steamName"` // current Steam name
 }
 
 type TrackerView struct {
 	ServerID   string        `json:"serverId"`
 	Source     string        `json:"source"`
 	Censored   bool          `json:"censored"`
+	SteamOn    bool          `json:"steamOn"`
+	SteamErr   string        `json:"steamErr"`
 	Shown      int           `json:"shown"`
 	Total      int           `json:"total"`
 	QueryAddr  string        `json:"queryAddr"`
@@ -677,7 +741,7 @@ func playtime(ss []Session, since time.Time, now time.Time) time.Duration {
 
 func (t *Tracker) viewLocked() TrackerView {
 	now := time.Now()
-	v := TrackerView{Censored: t.censored, Shown: t.shown, Total: t.total, Source: t.source, QueryAddr: t.queryAddr, ServerID: t.serverID, ServerName: t.serverName, Status: t.status, Players: t.bmPlayers, MaxPlayers: t.bmMax, Queue: t.bmQueue}
+	v := TrackerView{SteamOn: t.steamOn, SteamErr: t.steamErr, Censored: t.censored, Shown: t.shown, Total: t.total, Source: t.source, QueryAddr: t.queryAddr, ServerID: t.serverID, ServerName: t.serverName, Status: t.status, Players: t.bmPlayers, MaxPlayers: t.bmMax, Queue: t.bmQueue}
 	if !t.lastPoll.IsZero() {
 		v.LastPoll = t.lastPoll.Unix()
 	}
@@ -689,6 +753,16 @@ func (t *Tracker) viewLocked() TrackerView {
 				tmap[k] = tp
 			}
 			tv := TrackedView{TrackedPlayer: *tp}
+			if tp.SteamID != "" {
+				switch pr, ok := t.steam[tp.SteamID]; {
+				case !t.steamOn:
+					tv.Presence = "Add a free Steam Web API key in Settings to follow this Steam profile"
+				case ok:
+					tv.Presence, tv.SteamName = pr.Text, pr.Name
+				default:
+					tv.Presence = "Checking Steam…"
+				}
+			}
 			if p, ok := t.online[t.keyFor(tp)]; ok && t.keyFor(tp) != "" {
 				tv.Online = true
 				tv.OnlineFor = fmtDur(now.Sub(p.Since))
@@ -736,29 +810,65 @@ func (t *Tracker) viewLocked() TrackerView {
 	return v
 }
 
-// Track adds or updates a tracked player on the active server.
+// Track adds or updates a tracked player on the active server. tp.SteamID may be a Steam
+// profile link; it's resolved to a SteamID64 here.
 func (a *App) Track(tp TrackedPlayer) error {
+	a.mu.Lock()
+	key := a.cfg.Settings.SteamAPIKey
+	a.mu.Unlock()
+	if raw := strings.TrimSpace(tp.SteamID); raw != "" {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		id, err := resolveSteamID(ctx, key, raw)
+		if err == nil && strings.TrimSpace(tp.Name) == "" && key != "" {
+			if sum, e := fetchSummaries(ctx, key, []string{id}); e == nil {
+				tp.Name = cleanName(sum[id].PersonaName)
+			}
+		}
+		cancel()
+		if err != nil {
+			return err
+		}
+		tp.SteamID = id
+		if strings.TrimSpace(tp.Name) == "" {
+			tp.Name = "Steam " + id
+		}
+	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if a.srv == nil {
 		return errors.New("connect to a server first")
 	}
-	if tp.BMID != "" && !strings.HasPrefix(tp.BMID, "n:") {
+	if tp.BMID != "" && !strings.HasPrefix(tp.BMID, "n:") && !strings.HasPrefix(tp.BMID, "s:") {
 		tp.BMID = ParseBMID(tp.BMID)
 	} else {
 		tp.BMID = ""
 	}
-	if tp.BMID == "" && strings.TrimSpace(tp.Name) == "" {
-		return errors.New("enter a player name or BattleMetrics id/link")
+	if tp.BMID == "" && tp.SteamID == "" && strings.TrimSpace(tp.Name) == "" {
+		return errors.New("enter a player name, Steam profile link or BattleMetrics link")
 	}
 	for i := range a.srv.Tracked {
 		ex := &a.srv.Tracked[i]
-		if (tp.BMID != "" && ex.BMID == tp.BMID) || (tp.BMID == "" && strings.EqualFold(ex.Name, tp.Name)) {
+		same := false
+		switch {
+		case tp.SteamID != "" && ex.SteamID == tp.SteamID:
+			same = true
+		case tp.BMID != "" && ex.BMID == tp.BMID:
+			same = true
+		case tp.BMID == "" && tp.SteamID == "" && strings.EqualFold(ex.Name, tp.Name):
+			same = true
+		case tp.SteamID != "" && ex.SteamID == "" && tp.BMID == "" && strings.EqualFold(ex.Name, tp.Name):
+			same = true // linking a Steam profile to someone already tracked by name
+		}
+		if same {
 			ex.Tag, ex.Color, ex.Notes, ex.Notify = tp.Tag, tp.Color, tp.Notes, tp.Notify
 			if tp.Name != "" {
 				ex.Name = tp.Name
 			}
+			if tp.SteamID != "" {
+				ex.SteamID = tp.SteamID
+			}
 			a.saveLocked()
+			go a.tracker.poke()
 			return nil
 		}
 	}
@@ -778,7 +888,12 @@ func (a *App) Track(tp TrackedPlayer) error {
 	return nil
 }
 
-func (a *App) Untrack(bmID, name string) {
+// Untrack removes a tracked player, identified by the first of steamID, bmID or name given.
+func (a *App) Untrack(bmID, name string, steamID ...string) {
+	sid := ""
+	if len(steamID) > 0 {
+		sid = steamID[0]
+	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if a.srv == nil {
@@ -786,7 +901,10 @@ func (a *App) Untrack(bmID, name string) {
 	}
 	var out []TrackedPlayer
 	for _, tp := range a.srv.Tracked {
-		if (bmID != "" && tp.BMID == bmID) || (bmID == "" && strings.EqualFold(tp.Name, name)) {
+		switch {
+		case sid != "" && tp.SteamID == sid,
+			sid == "" && bmID != "" && tp.BMID == bmID,
+			sid == "" && bmID == "" && strings.EqualFold(tp.Name, name):
 			continue
 		}
 		out = append(out, tp)

@@ -303,9 +303,9 @@ function renderPlayers() {
     const form = direct
       ? `<form class="inline" id="trkAddr" style="margin:0 0 0 auto"><input name="v" placeholder="Server address, e.g. 123.45.67.89:28015" size="34" aria-label="Server address"><button class="ghost">Set address</button></form>`
       : `<form class="inline" id="trkAddr" style="margin:0 0 0 auto"><input name="v" placeholder="BattleMetrics server link or ID" size="30" aria-label="BattleMetrics server"><button class="ghost">${T.serverId ? "Change server" : "Link server"}</button></form>`;
-    $("#bmStatus").innerHTML = `<div class="bm">${where}<span class="pill ${ok ? "ok" : "warn"}" style="white-space:normal">${ok ? "Updated " + (T.lastPoll ? ago(T.lastPoll) : "") : esc(T.status)}</span>${form}<button class="ghost" onclick="act('/api/tracker/refresh',{})">Refresh now</button></div>
+    $("#bmStatus").innerHTML = `<div class="bm">${where}<span class="pill ${ok ? "ok" : "warn"}" style="white-space:normal">${ok ? "Updated " + (T.lastPoll ? ago(T.lastPoll) : "") : esc(T.status)}</span>${T.steamErr ? `<span class="pill warn" style="white-space:normal">Steam: ${esc(T.steamErr)}</span>` : ""}${form}<button class="ghost" onclick="act('/api/tracker/refresh',{})">Refresh now</button></div>
       <p class="muted" style="margin-top:8px">${direct
-        ? "Names come straight from the server, the same way server browsers see them, with each player's real session length. If someone changes their name, re-track them under the new one. A BattleMetrics API key (Settings) switches to BattleMetrics instead."
+        ? "Names come straight from the server, the same way server browsers see them. Players tracked by name are matched by name; players tracked by Steam profile are followed through Steam, so they're found even when the server hides names or they rename."
         : "Using BattleMetrics because an API key is set in Settings. Remove the key to use the free direct server query."}</p>`;
     $("#trkAddr").onsubmit = (e) => {
       e.preventDefault();
@@ -324,20 +324,21 @@ function renderPlayers() {
       return `<i style="left:${((a - (now - span)) / span) * 100}%;width:${Math.max(0.3, ((b - a) / span) * 100)}%"></i>`;
     }).join("");
     const state = p.online ? `<span class="pill ok">Online ${esc(p.onlineFor)}</span>` : `<span class="pill">${p.lastSeenAgo ? "Last seen " + esc(p.lastSeenAgo) + " ago" : "Not seen yet"}</span>`;
+    const steam = p.steamId ? `<div class="sub">Steam: ${esc(p.presence || "")}${p.steamName && p.steamName !== p.name ? ` · now called <b>${esc(p.steamName)}</b>` : ""} · <a href="https://steamcommunity.com/profiles/${esc(p.steamId)}" target="_blank" rel="noopener">Profile</a></div>` : "";
     return `<div class="trk"><span class="dot ${p.online ? "on" : ""}" style="margin-top:6px"></span>
       <div><div class="name">${p.tag ? `<span class="tag" style="background:${esc(p.color || "#e0ad3e")}">${esc(p.tag)}</span>` : ""}${esc(p.name)}</div>
-      <div class="sub">${state} · played ${esc(p.playtime24h)} in 24h, ${esc(p.playtime7d)} in 7 days${p.bmId && !direct ? ` · <a href="https://www.battlemetrics.com/players/${p.bmId}" target="_blank" rel="noopener">BattleMetrics</a>` : ""}</div></div>
+      <div class="sub">${state} · played ${esc(p.playtime24h)} in 24h, ${esc(p.playtime7d)} in 7 days${p.bmId && !direct ? ` · <a href="https://www.battlemetrics.com/players/${p.bmId}" target="_blank" rel="noopener">BattleMetrics</a>` : ""}</div>${steam}</div>
       <div class="acts"><label title="Alert me when they join or leave" class="muted" style="display:flex;gap:4px;align-items:center;font-size:13px"><input type="checkbox" ${p.notify ? "checked" : ""} onchange="retag('${p.bmId}','${esc(p.name)}',{notify:this.checked})">Alerts</label>
-      <button class="ghost small" onclick="editTag('${p.bmId}','${esc(p.name)}')">Edit tag</button><button class="danger small" onclick="untrack('${p.bmId}','${esc(p.name)}')">Untrack</button></div>
+      <button class="ghost small" onclick="editTag('${p.bmId}','${esc(p.name)}')">Edit tag</button>${p.steamId ? "" : `<button class="ghost small" title="Follow them through their Steam profile instead of their name" onclick="linkSteam('${p.bmId}','${esc(p.name)}')">Link Steam</button>`}<button class="danger small" onclick="untrack('${p.bmId}','${esc(p.name)}','${esc(p.steamId || "")}')">Untrack</button></div>
       <div class="timeline" title="Online time over the last 7 days">${bars}</div><div class="timeline-legend"><span>7 days ago</span><span>now</span></div></div>`;
-  }).join("") || `<div class="empty-note">Nobody tracked yet. Track someone from the online list or by name.</div>`;
+  }).join("") || `<div class="empty-note">Nobody tracked yet. Track someone from the online list, by name, or by Steam profile link.</div>`;
 
   const f = $("#onlineFilter").value.trim().toLowerCase();
   const on = (T.online || []).filter((p) => !f || p.name.toLowerCase().includes(f));
   const cnt = (T.online || []).length;
   $("#onlineCount").textContent = T.total && T.shown && T.shown < T.total - 2 ? `(${cnt} of ${T.total})` : `(${cnt})`;
   let note = "";
-  if (T.censored) note += `<div class="emptybox" style="margin-bottom:10px"><b>This server hides real player names.</b><p>It uses Rust's <code>server.censorplayerlist</code> setting, so the names below are random stand-ins, not Steam names. BattleMetrics sees the same random names, so an API key won't help here. Players tracked by their real name won't be matched on this server. You can track a stand-in name, but it only follows that person as long as the server keeps giving them the same one.</p></div>`;
+  if (T.censored) note += `<div class="emptybox" style="margin-bottom:10px"><b>This server hides real player names.</b><p>Rust's <code>server.censorplayerlist</code> setting (on by default) swaps everyone's name for a random stand-in in the public player list, so these aren't Steam names and tracking by name won't match here. BattleMetrics can still show real names when the server owner has given it admin access, but that feed isn't public.</p><p><b>To follow someone here, track them by Steam profile:</b> paste their Steam profile link in “Track player”, or press <b>Link Steam</b> on someone you already track. ${T.steamOn ? "RustWatch then checks Steam every minute for which server they're on." : "This needs the free Steam Web API key in Settings → Kills."} It works as long as their Steam profile is public.</p></div>`;
   if (T.total && T.shown && T.shown < T.total - 2) note += `<div class="muted" style="font-size:13px;margin-bottom:8px">The server only sent ${T.shown} of its ${T.total} players — its reply is cut short, so some players never appear here.</div>`;
   $("#onlineList").innerHTML = note + `<table><tbody>${on.map((p) => `<tr><td>${p.tracked ? `<span class="tag" style="background:${esc(p.color || "#e0ad3e")}">${esc(p.tag || "tracked")}</span>` : ""}${esc(p.name)}</td><td class="num muted">${esc(p.onlineFor)}</td><td style="text-align:right">${p.tracked ? "" : `<button class="ghost small" onclick="quickTrack('${p.id}','${esc(p.name)}')">Track</button>`}</td></tr>`).join("")}</tbody></table>` + (on.length ? "" : `<div class="empty-note">${ok ? "No players match." : "Waiting for the player list…"}</div>`);
   $("#activity").innerHTML = (T.activity || []).map((a) => `<div class="act"><span class="muted">${clock(a.time)}</span> <span class="${a.joined ? "j" : "l"}">${a.joined ? "joined" : "left"}</span> ${a.tag ? `<span class="tag" style="background:var(--event)">${esc(a.tag)}</span>` : ""}${esc(a.name)}</div>`).join("") || `<div class="empty-note">Joins and leaves appear here after the next update.</div>`;
@@ -347,8 +348,9 @@ $("#trackForm").addEventListener("submit", (e) => {
   e.preventDefault();
   const who = e.target.who.value.trim();
   if (!who) return;
-  const isBM = /battlemetrics|^\d{5,}$/.test(who);
-  act("/api/tracker/track", { bmId: isBM ? who : "", name: isBM ? "" : who, tag: e.target.tag.value.trim(), color: e.target.color.value, notify: true }, "Tracking " + who).then(() => { e.target.who.value = ""; });
+  const isSteam = /steamcommunity\.com|^7656119\d{10}$/.test(who);
+  const isBM = !isSteam && /battlemetrics|^\d{5,}$/.test(who);
+  act("/api/tracker/track", { bmId: isBM ? who : "", steamId: isSteam ? who : "", name: isBM || isSteam ? "" : who, tag: e.target.tag.value.trim(), color: e.target.color.value, notify: true }, "Tracking " + (isSteam ? "Steam profile" : who)).then(() => { e.target.who.value = ""; });
 });
 window.quickTrack = (id, name) => {
   const tag = prompt(`Tag for ${name} (e.g. enemy, neighbour, clan name):`, "");
@@ -358,7 +360,11 @@ window.quickTrack = (id, name) => {
 function findTracked(bmId, name) { return S.tracker.tracked.find((t) => (bmId && t.bmId === bmId) || (!bmId && t.name === name)); }
 window.retag = (bmId, name, patch) => { const t = findTracked(bmId, name); act("/api/tracker/track", { ...t, ...patch }); };
 window.editTag = (bmId, name) => { const t = findTracked(bmId, name); const tag = prompt("Tag:", t.tag || ""); if (tag !== null) retag(bmId, name, { tag }); };
-window.untrack = (bmId, name) => { if (confirm(`Stop tracking ${name}?`)) act("/api/tracker/untrack", { bmId, name }); };
+window.untrack = (bmId, name, steamId) => { if (confirm(`Stop tracking ${name}?`)) act("/api/tracker/untrack", { bmId, name, steamId }); };
+window.linkSteam = (bmId, name) => {
+  const link = prompt(`Steam profile link for ${name}\n(open their Steam profile, right-click the page → Copy Page URL):`, "");
+  if (link && link.trim()) retag(bmId, name, { steamId: link.trim() });
+};
 
 /* ---------- chat ---------- */
 let chatLen = -1;
@@ -531,7 +537,7 @@ function renderSettings(force) {
     ${row("Player list refresh (seconds)", num("bmPollSeconds", 30))}
     ${row("BattleMetrics API key", `<input name="bmToken" type="password" value="${esc(s.bmToken)}" placeholder="optional, needs a paid plan" style="width:340px">`, "Leave empty to read the player list straight from the server (free). BattleMetrics has required a paid subscription since July 2026; with a key, tracked players are followed by BattleMetrics ID even if they change name.")}
     <h2>Kills</h2>
-    ${row("Steam Web API key", `<input name="steamApiKey" type="password" value="${esc(s.steamApiKey || "")}" placeholder="free, from steamcommunity.com/dev/apikey" style="width:340px">`, `Shows teammates' kills, deaths and hours from Steam. Get one free at <a href="https://steamcommunity.com/dev/apikey" target="_blank" rel="noopener">steamcommunity.com/dev/apikey</a> (any domain name works). Teammates need public game details on Steam.`)}
+    ${row("Steam Web API key", `<input name="steamApiKey" type="password" value="${esc(s.steamApiKey || "")}" placeholder="free, from steamcommunity.com/dev/apikey" style="width:340px">`, `Shows teammates' kills, deaths and hours from Steam, and lets the player tracker follow people by Steam profile (works on servers that hide names). Get one free at <a href="https://steamcommunity.com/dev/apikey" target="_blank" rel="noopener">steamcommunity.com/dev/apikey</a> (any domain name works). Teammates need public game details on Steam.`)}
     <h2>Alerts</h2>
     ${row("Windows notifications", `<span>${notifyStatus()}</span>`, "Shown while the RustWatch window is open. Choose which alerts use them in the table below.")}
     ${row("Play a sound in the app", chk("sound"))}

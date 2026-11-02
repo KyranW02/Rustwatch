@@ -91,7 +91,9 @@ func main() {
 			Watches: []app.VendingWatch{{ItemID: 1545779598}},
 			Tracked: []app.TrackedPlayer{{BMID: "1004", Name: "night_raider", Tag: "Enemy", Color: "#e5484d", Notify: true},
 				{BMID: "1003", Name: "Gary the Builder", Tag: "Neighbour", Color: "#e8a33d", Notify: true},
-				{Name: "zerg_lord", Tag: "Zerg", Color: "#8e4ec6", Notify: true}},
+				{Name: "zerg_lord", Tag: "Zerg", Color: "#8e4ec6", Notify: true},
+				{SteamID: "76561198000000077", Name: "Ghost", Tag: "Steam", Color: "#3e8ed0", Notify: true},
+				{SteamID: "76561198000000078", Name: "Hermit", Tag: "Steam", Color: "#3e8ed0"}},
 		})
 	}
 	a.Start()

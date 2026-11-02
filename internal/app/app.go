@@ -21,7 +21,7 @@ import (
 )
 
 // Version is this build. Bump it for every release (tag the GitHub release v<Version>).
-const Version = "1.1.3"
+const Version = "1.2.0"
 
 type LogEntry struct {
 	Time  int64  `json:"time"`
