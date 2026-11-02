@@ -103,7 +103,7 @@ func (r *RaidWatch) reload() {
 		}
 		id := strings.TrimSuffix(filepath.Base(f), ".wav")
 		if strings.HasPrefix(id, "x_music") {
-			tpls = append(tpls, sound.TemplatesFromClip(id, x, 12)...)
+			tpls = append(tpls, sound.TemplatesFromClip(id, x, max(12, 2*len(x)/sound.Rate))...)
 		} else if t, ok := sound.NewBlastTemplate(id, x); ok {
 			tpls = append(tpls, t)
 		}
