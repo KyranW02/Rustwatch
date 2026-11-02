@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"net"
 	"net/http"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -87,6 +88,7 @@ type StateView struct {
 	Notes       []rustplus.Note   `json:"notes"`
 	Forecasts   []Forecast        `json:"forecasts"`
 	Update      UpdateInfo        `json:"update"`
+	MarkerInfo  MarkerDiag        `json:"markerInfo"`
 }
 
 func (a *App) stateLocked() StateView {
@@ -152,6 +154,7 @@ func (a *App) stateLocked() StateView {
 		v.Events = &s
 	}
 	v.Forecasts = a.forecastsLocked()
+	v.MarkerInfo = a.markerDiag
 	if a.vending != nil {
 		v.Vending = a.vending.list()
 	}
@@ -782,6 +785,14 @@ func (a *App) Handler() http.Handler {
 			return nil, err
 		}
 		return nil, a.RestartWith(path)
+	})
+	post("/api/diagnostics", func(r *http.Request) (any, error) {
+		path, err := a.SaveDiagnostics()
+		if err != nil {
+			return nil, err
+		}
+		OpenFolder(filepath.Dir(path))
+		return map[string]string{"path": path}, nil
 	})
 	post("/api/window", func(r *http.Request) (any, error) {
 		go a.OpenWindow()

@@ -86,6 +86,7 @@ func (c *Client) readLoop(conn *ws.Conn) {
 		}
 		resp, bc := DecodeAppMessage(data)
 		if resp != nil {
+			resp.Raw = data
 			c.mu.Lock()
 			ch := c.pending[resp.Seq]
 			delete(c.pending, resp.Seq)
@@ -279,11 +280,24 @@ func (c *Client) SetEntityValue(ctx context.Context, entityID uint32, value bool
 }
 
 func (c *Client) GetMapMarkers(ctx context.Context) ([]Marker, error) {
+	m, _, err := c.GetMapMarkersRaw(ctx)
+	return m, err
+}
+
+// GetMapMarkersRaw also returns the raw server message (for diagnostics).
+func (c *Client) GetMapMarkersRaw(ctx context.Context) ([]Marker, []byte, error) {
 	r, err := c.request(ctx, 1, 0, empty(18))
 	if err != nil {
-		return nil, err
+		var raw []byte
+		if r != nil {
+			raw = r.Raw
+		}
+		return nil, raw, err
 	}
-	return r.Markers, nil
+	if !r.HasMarkers {
+		return nil, r.Raw, errors.New("the server's reply had no map markers in it")
+	}
+	return r.Markers, r.Raw, nil
 }
 
 func (c *Client) PromoteToLeader(ctx context.Context, steamID uint64) error {

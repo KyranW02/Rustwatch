@@ -21,7 +21,7 @@ import (
 )
 
 // Version is this build. Bump it for every release (tag the GitHub release v<Version>).
-const Version = "1.1.0"
+const Version = "1.1.1"
 
 type LogEntry struct {
 	Time  int64  `json:"time"`
@@ -108,6 +108,7 @@ type App struct {
 	statsPoke      chan struct{}
 	windowAlerted  map[string]int64
 	update         UpdateInfo
+	markerDiag     MarkerDiag
 	updateNotified string
 }
 
@@ -508,9 +509,7 @@ func (a *App) initSession(ctx context.Context, c *rustplus.Client) error {
 		a.mu.Unlock()
 	}
 	a.refreshDevices(ctx, c)
-	if mk, err := c.GetMapMarkers(ctx); err == nil {
-		a.updateMarkers(mk)
-	}
+	a.fetchMarkers(ctx, c)
 	a.tracker.poke()
 	select {
 	case a.statsPoke <- struct{}{}:
@@ -539,9 +538,7 @@ func (a *App) pollLoop(ctx context.Context, c *rustplus.Client, discon chan erro
 			if team, err := c.GetTeamInfo(ctx); err == nil {
 				a.updateTeam(team)
 			}
-			if mk, err := c.GetMapMarkers(ctx); err == nil {
-				a.updateMarkers(mk)
-			}
+			a.fetchMarkers(ctx, c)
 		case <-slow.C:
 			if info, err := c.GetInfo(ctx); err == nil {
 				a.mu.Lock()
@@ -921,6 +918,47 @@ func (a *App) teamViewLocked() []MemberView {
 }
 
 // ---------- markers ----------
+
+// MarkerDiag describes the last map-marker fetch (shown in the app and in diagnostics).
+type MarkerDiag struct {
+	Total   int           `json:"total"`
+	ByType  map[int32]int `json:"byType"`
+	Vending int           `json:"vending"`
+	Error   string        `json:"error"`
+	ErrAt   int64         `json:"errAt"`
+	At      int64         `json:"at"`
+	raw     []byte
+	sig     string
+}
+
+func (a *App) fetchMarkers(ctx context.Context, c *rustplus.Client) {
+	mk, raw, err := c.GetMapMarkersRaw(ctx)
+	a.mu.Lock()
+	d := &a.markerDiag
+	if len(raw) > 0 {
+		d.raw = raw
+	}
+	if err != nil {
+		if d.Error != err.Error() {
+			log.Printf("map markers: %v", err)
+		}
+		d.Error, d.ErrAt = err.Error(), time.Now().Unix()
+		a.mu.Unlock()
+		return
+	}
+	d.Error, d.At, d.Total = "", time.Now().Unix(), len(mk)
+	d.ByType = map[int32]int{}
+	for _, m := range mk {
+		d.ByType[m.Type]++
+	}
+	d.Vending = d.ByType[rustplus.MarkerVendingMachine]
+	if sig := fmt.Sprint(d.ByType); sig != d.sig {
+		d.sig = sig
+		log.Printf("map markers: %d total, %d shops, by type %v (%d bytes)", d.Total, d.Vending, d.ByType, len(raw))
+	}
+	a.mu.Unlock()
+	a.updateMarkers(mk)
+}
 
 func (a *App) updateMarkers(mk []rustplus.Marker) {
 	a.mu.Lock()

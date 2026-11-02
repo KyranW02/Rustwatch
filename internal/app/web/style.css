@@ -256,3 +256,6 @@ code { font-family: Consolas, "Cascadia Mono", monospace; font-size: 13px; backg
 .updbtn { background: #4a3a14; border-color: #8a6a22; color: #f2dca3; }
 .updbtn:hover { background: #5c4919; }
 .updnotes { background: #1a1e21; border: 1px solid var(--line); border-radius: 4px; padding: 10px 12px; font-size: 14px; max-width: 72ch; }
+
+.emptybox { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 14px 16px; max-width: 72ch; }
+.emptybox p { margin: 8px 0; color: var(--muted); }

@@ -203,12 +203,25 @@ function renderShops() {
   vms.forEach((v) => (v.orders || []).forEach((o) => ids.push(o.itemId, o.currencyId)));
   ensureNames(ids).then((changed) => changed && renderShops());
   $("#vendCount").textContent = `(${vms.length})`;
+  const mi = S.markerInfo || {};
+  const diagLine = mi.at || mi.error
+    ? `Rust+ map data: ${mi.total || 0} markers, ${mi.vending || 0} shops${mi.at ? " · updated " + ago(mi.at) : ""}${mi.error ? ` · <span style="color:#e8a097">last error: ${esc(mi.error)}</span>` : ""}`
+    : "Waiting for the first map update…";
+  $("#vendDiag").innerHTML = `<span class="muted">${diagLine}</span>`;
   const f = $("#vendFilter").value.trim().toLowerCase();
   const tracked = new Set(S.trackedVMs || []);
   const list = vms.filter((v) => !f || v.name.toLowerCase().includes(f) || (v.orders || []).some((o) => itemName(o.itemId).toLowerCase().includes(f)));
+  if (S.active && !vms.length && (mi.at || mi.error)) {
+    $("#vendList").innerHTML = `<div class="emptybox"><b>The server isn't reporting any shops.</b>
+      <p>RustWatch only sees vending machines that Rust+ sends, the same ones the Rust+ phone app shows. If you can see shop icons on the in-game map (G) but not here, the server may be hiding them from Rust+ (some modded servers do). Shops also need their broadcast switch on.</p>
+      <p>${mi.error ? "The last request failed: " + esc(mi.error) + ". " : ""}Save a diagnostics file and send it over so the cause can be found.</p>
+      <button class="small" onclick="saveDiag()">Save diagnostics</button></div>`;
+    return;
+  }
   $("#vendList").innerHTML = list.map((v) => `<div class="shop"><header><span class="g">${esc(v.grid.split(" ")[0])}</span><b>${esc(v.name)}</b>${v.outOfStock ? '<span class="pill">Out of stock</span>' : ""}<button class="${tracked.has(v.key) ? "" : "ghost"} small" onclick="trackVM('${v.key}',${!tracked.has(v.key)})">${tracked.has(v.key) ? "Tracking changes" : "Track changes"}</button></header>${(v.orders || []).map(orderLine).join("")}</div>`).join("") || `<div class="empty-note">${S.active ? "No vending machines on the map yet." : "Connect to a server first."}</div>`;
   $("#watchList").innerHTML = (S.watches || []).map((w) => `<div class="hit"><span>${icon(w.short)}</span><span><b>${esc(w.name)}</b> ${w.maxPrice ? `<span class="muted">at most ${w.maxPrice}</span>` : '<span class="muted">any price</span>'} <button class="ghost small" onclick="act('/api/vending/watch',{itemId:${w.itemId},remove:true})">Stop watching</button></span></div>`).join("") || `<div class="empty-note">No item alerts yet.</div>`;
 }
+window.saveDiag = () => api("/api/diagnostics", {}).then((r) => toast("Diagnostics saved", r.path)).catch((e) => toast("Couldn't save diagnostics", e.message, "alarm"));
 window.trackVM = (key, on) => act("/api/vending/track", { key, track: on });
 $("#vendFilter").addEventListener("input", renderShops);
 $("#vendSearch").addEventListener("submit", async (e) => {
@@ -527,6 +540,7 @@ function renderSettings(force) {
     ${row("Check for updates automatically", `<input type="checkbox" name="autoUpdate" ${s.noUpdateCheck ? "" : "checked"}>`, "Checks GitHub every 6 hours. Updates are only installed when you click Update now.")}
     <h2>Files</h2>
     ${row("Data folder", `<span><code>${esc(S.dataDir)}</code> <button type="button" class="ghost small" onclick="act('/api/datadir/open',{})">Open folder</button></span>`, "Settings and logs live here: the logs folder has one file per day for the app, alerts and team chat (last 30 days kept).")}
+    ${row("Diagnostics", `<button type="button" class="ghost small" onclick="saveDiag()">Save diagnostics</button>`, "Writes a file to the logs folder describing what RustWatch sees from the server (no passwords or keys), for troubleshooting.")}
     ${row("Move data folder to", `<span class="inline" style="margin:0"><input id="newDataDir" placeholder="D:\\Games\\RustWatch" style="width:340px" aria-label="New data folder"><button type="button" class="ghost" onclick="moveData()">Move and restart</button></span>`, "Your settings and logs are copied over and RustWatch restarts. The old folder is left as it was, so you can delete it.")}
     <h2>App</h2>
     ${row("Keep running after closing the window", chk("keepRunning"), "Alerts keep coming while the window is closed. Start RustWatch again to reopen it.")}

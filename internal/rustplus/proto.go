@@ -144,6 +144,7 @@ type Marker struct {
 }
 
 type Response struct {
+	Raw        []byte // the whole AppMessage, for diagnostics
 	Seq        uint32
 	Success    bool
 	Error      string

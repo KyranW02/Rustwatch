@@ -144,6 +144,19 @@ func TestEndToEnd(t *testing.T) {
 		t.Fatalf("devices %+v", st.Devices)
 	}
 
+	dpath, err := a.SaveDiagnostics()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(dpath); !strings.Contains(string(b), "14 shops") || !strings.Contains(string(b), "raw map-marker reply") {
+		t.Fatalf("diagnostics:\n%s", b[:min(len(b), 600)])
+	}
+	a.mu.Lock()
+	if a.markerDiag.Vending != 14 || len(a.markerDiag.raw) < 500 {
+		t.Errorf("marker diag %+v", a.markerDiag)
+	}
+	a.mu.Unlock()
+
 	me := uint64(76561198000000001)
 	checks := map[string]string{
 		"pop":          "Population: 147/200, 3 in queue",
