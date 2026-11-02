@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"net"
 	"net/http"
@@ -611,6 +612,19 @@ func (a *App) Handler() http.Handler {
 			return nil, err
 		}
 		return map[string]any{"id": id, "seconds": float64(len(x)) / sound.Rate, "wave": waveform(x, 900)}, nil
+	})
+	mux.HandleFunc("POST /api/sounds/import", func(w http.ResponseWriter, r *http.Request) {
+		data, err := io.ReadAll(io.LimitReader(r.Body, 64<<20))
+		if err != nil {
+			writeErr(w, err)
+			return
+		}
+		id, x, err := a.sounds.Import(data)
+		if err != nil {
+			writeErr(w, err)
+			return
+		}
+		writeJSON(w, map[string]any{"id": id, "seconds": float64(len(x)) / sound.Rate, "wave": waveform(x, 900), "imported": true})
 	})
 	type cueSel struct {
 		ID       string

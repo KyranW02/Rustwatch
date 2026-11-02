@@ -351,6 +351,25 @@ func (w *SoundWatch) Capture() (string, []float32, error) {
 	return id, x, nil
 }
 
+// Import opens a sound file (e.g. one extracted from the game) as a clip to cut a cue from.
+func (w *SoundWatch) Import(data []byte) (string, []float32, error) {
+	x, err := sound.DecodeWAV(data)
+	if err != nil {
+		return "", nil, err
+	}
+	if len(x) < sound.Rate/4 {
+		return "", nil, errors.New("that file is too short")
+	}
+	if len(x) > 120*sound.Rate {
+		x = x[:120*sound.Rate] // only the first two minutes
+	}
+	id := strconv.FormatInt(time.Now().UnixNano(), 36)
+	w.mu.Lock()
+	w.clips[id] = pendingClip{samples: x, at: time.Now()}
+	w.mu.Unlock()
+	return id, x, nil
+}
+
 func (w *SoundWatch) clip(id string, from, to float64) ([]float32, error) {
 	w.mu.Lock()
 	c, ok := w.clips[id]

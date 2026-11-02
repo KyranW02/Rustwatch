@@ -857,6 +857,28 @@ window.setSoundOn = (v) => { const s = { ...S.settings, soundOff: !v }; act("/ap
 window.playCue = (id) => new Audio(`/api/sounds/cue?id=${encodeURIComponent(id)}`).play();
 window.delCue = (id) => { if (confirm("Delete this saved sound?")) act("/api/sounds/delete", { id }); };
 
+$("#sndImportBtn").addEventListener("click", () => $("#sndImport").click());
+$("#sndImport").addEventListener("change", async (e) => {
+  const f = e.target.files[0];
+  e.target.value = "";
+  if (!f) return;
+  try {
+    const r = await fetch("/api/sounds/import", { method: "POST", headers: { "Content-Type": "application/octet-stream" }, body: f });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error || r.statusText);
+    teach = { ...j, from: 0, to: Math.min(j.seconds, 10), event: guessEvent(f.name) || teach?.event || "cargo", result: "", file: f.name };
+    drawTeach();
+  } catch (err) { toast("Couldn't open that file", err.message, "alarm"); }
+});
+// pick the event from a file name like "cargoship_horn.wav"
+function guessEvent(name) {
+  const n = name.toLowerCase();
+  const rules = [["cargo", "cargo"], ["small", "oil_small"], ["large", "oil_large"], ["oil", "oil_large"], ["excavat", "excavator"], ["deep", "deepsea"],
+    ["bradley", "bradley"], ["apc", "bradley"], ["heli", "heli_down"], ["vendor", "vendor"], ["travel", "vendor"]];
+  for (const [k, ev] of rules) if (n.includes(k)) return ev;
+  return "";
+}
+
 $("#sndCapture").addEventListener("click", async () => {
   try {
     const r = await api("/api/sounds/capture", {});
@@ -868,9 +890,9 @@ $("#sndCapture").addEventListener("click", async () => {
 function drawTeach() {
   const t = teach;
   const opts = (S.sounds.events || []).map((e) => `<option value="${e.key}" ${e.key === t.event ? "selected" : ""}>${esc(e.label)}</option>`).join("");
-  $("#sndEditor").innerHTML = `<p class="muted" style="font-size:13px;margin-top:0">Drag across the picture to select just the sound (cues show up as bright lines or a bright band). Play it back to check, then save it.</p>
+  $("#sndEditor").innerHTML = `<p class="muted" style="font-size:13px;margin-top:0">${t.imported ? "If the file is just the sound, keep the whole thing selected. Otherwise drag" : "Drag"} across the picture to select just the sound (cues show up as bright lines or a bright band). Play it back to check, then save it.</p>
     <div class="sndclip" id="sndClip"><img src="/api/sounds/clip?img=1&id=${t.id}" alt="Spectrogram of the captured audio" draggable="false"><canvas></canvas></div>
-    <div class="timeline-legend"><span>${Math.round(t.seconds)} s ago</span><span id="sndSel"></span><span>now</span></div>
+    <div class="timeline-legend"><span>${t.imported ? esc(t.file || "start") : Math.round(t.seconds) + " s ago"}</span><span id="sndSel"></span><span>${t.imported ? Math.round(t.seconds) + " s" : "now"}</span></div>
     <div class="inline" style="margin-top:10px;flex-wrap:wrap"><button class="ghost" id="sndPlay">Play selection</button>
       <select id="sndEvent" aria-label="Which event is this">${opts}</select>
       <button class="ghost" id="sndTest">Check it</button><button id="sndSave">Save sound</button></div>

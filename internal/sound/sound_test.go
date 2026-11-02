@@ -1,6 +1,8 @@
 package sound
 
 import (
+	"bytes"
+	"encoding/binary"
 	"math"
 	"math/rand"
 	"testing"
@@ -179,5 +181,36 @@ func TestWAVRoundTrip(t *testing.T) {
 		if d := h[i] - back[i]; d > 0.001 || d < -0.001 {
 			t.Fatalf("sample %d: %v vs %v", i, h[i], back[i])
 		}
+	}
+}
+
+// 44.1 kHz stereo float WAV (what game-file extractors and Audacity often write) decodes to
+// the same sound.
+func TestWAVFloatStereo(t *testing.T) {
+	h := horn(2.8)
+	var b bytes.Buffer
+	n := len(h) * 4 // resample crudely to 48k by repeating: 12k*4
+	b.WriteString("RIFF")
+	binary.Write(&b, binary.LittleEndian, uint32(36+n*8))
+	b.WriteString("WAVEfmt ")
+	for _, v := range []any{uint32(16), uint16(3), uint16(2), uint32(48000), uint32(48000 * 8), uint16(8), uint16(32)} {
+		binary.Write(&b, binary.LittleEndian, v)
+	}
+	b.WriteString("data")
+	binary.Write(&b, binary.LittleEndian, uint32(n*8))
+	for _, v := range h {
+		for k := 0; k < 4; k++ {
+			binary.Write(&b, binary.LittleEndian, math.Float32bits(v))
+			binary.Write(&b, binary.LittleEndian, math.Float32bits(v))
+		}
+	}
+	x, err := DecodeWAV(b.Bytes())
+	if err != nil || len(x) < len(h)-50 || len(x) > len(h)+50 {
+		t.Fatal(err, len(x), len(h))
+	}
+	m := NewMatcher([]Ref{{"horn", Analyze(x)}})
+	sc := m.Match(Analyze(mix(noise(8, 2), horn(2.8), 3*Rate, 0.4)))
+	if len(sc) == 0 || !sc[0].Detected() {
+		t.Fatalf("decoded file doesn't recognise the horn: %+v", sc)
 	}
 }
