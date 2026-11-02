@@ -1,0 +1,4 @@
+dist/
+*.exe
+*.exe.sha256
+*.old

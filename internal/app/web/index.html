@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RustWatch</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23262b2f'/%3E%3Ccircle cx='16' cy='16' r='9' fill='none' stroke='%235fa38a' stroke-width='3'/%3E%3Ccircle cx='16' cy='16' r='3' fill='%23e0ad3e'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<nav class="rail" aria-label="Sections">
+  <div class="brand"><svg viewBox="0 0 32 32" width="26" height="26" aria-hidden="true"><circle cx="16" cy="16" r="10" fill="none" stroke="currentColor" stroke-width="3"/><circle cx="16" cy="16" r="3.5" fill="#e0ad3e"/></svg><span>RustWatch</span></div>
+  <button data-tab="overview" class="on">Overview</button>
+  <button data-tab="map">Map</button>
+  <button data-tab="team">Team</button>
+  <button data-tab="shops">Shops</button>
+  <button data-tab="devices">Devices</button>
+  <button data-tab="players">Players</button>
+  <button data-tab="chat">Team chat</button>
+  <button data-tab="commands">Commands</button>
+  <button data-tab="items">Items</button>
+  <button data-tab="alerts">Alerts <b id="alertCount"></b></button>
+  <div class="rail-spacer"></div>
+  <button data-tab="servers">Servers</button>
+  <button data-tab="settings">Settings</button>
+</nav>
+
+<header class="strip" id="strip"></header>
+
+<main id="main">
+  <section data-panel="overview" class="on">
+    <div class="ov">
+      <div class="ov-map mapbox" id="mapOverview"></div>
+      <div class="ov-side">
+        <div class="block"><h2>World events</h2><div id="ovEvents"></div></div>
+        <div class="block"><h2>Team</h2><div id="ovTeam"></div></div>
+        <div class="block"><h2>Timers</h2><div id="ovTimers"></div>
+          <form class="inline" id="timerForm"><input name="d" placeholder="10m" size="5" aria-label="Duration"><input name="m" placeholder="Message to team chat" aria-label="Message"><button>Add timer</button></form>
+        </div>
+        <div class="block"><h2>Latest alerts</h2><div id="ovAlerts"></div></div>
+      </div>
+    </div>
+  </section>
+
+  <section data-panel="map"><div class="mapbox full" id="mapFull"></div></section>
+
+  <section data-panel="team"><div class="page"><h1>Team</h1><div id="teamTable"></div></div></section>
+
+  <section data-panel="shops">
+    <div class="page">
+      <h1>Shops</h1>
+      <div class="cols">
+        <div>
+          <form class="inline" id="vendSearch">
+            <input name="q" placeholder="Search an item, e.g. ak, hqm, tc" autocomplete="off" aria-label="Item">
+            <select name="mode" aria-label="Mode"><option value="buy">Who sells it</option><option value="sell">Who buys it</option></select>
+            <button>Search</button>
+          </form>
+          <div id="vendResults"></div>
+          <h2>All shops <span class="muted" id="vendCount"></span></h2>
+          <input id="vendFilter" placeholder="Filter shops by item or name" aria-label="Filter shops">
+          <div id="vendList"></div>
+        </div>
+        <div>
+          <h2>Item alerts</h2>
+          <p class="muted">Get notified when one of these items is put up for sale.</p>
+          <form class="inline" id="watchForm"><input name="q" placeholder="Item" list="itemList" aria-label="Item"><input name="max" placeholder="Max price" size="8" aria-label="Max price"><button>Watch item</button></form>
+          <datalist id="itemList"></datalist>
+          <div id="watchList"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section data-panel="devices">
+    <div class="page">
+      <h1>Smart devices</h1>
+      <p class="muted">Pair devices in-game: look at a smart switch, alarm or storage monitor, hold E and choose Pair. They appear here automatically. Name a switch's chat command to toggle it from team chat.</p>
+      <div id="devices"></div>
+      <details class="addbox"><summary>Add a device by entity ID</summary>
+        <form class="inline" id="devForm"><input name="id" placeholder="Entity ID" size="10"><input name="name" placeholder="Name"><input name="cmd" placeholder="Chat command (switches)" size="14"><button>Add device</button></form>
+      </details>
+    </div>
+  </section>
+
+  <section data-panel="players">
+    <div class="page">
+      <h1>Player tracker</h1>
+      <div id="bmStatus"></div>
+      <div class="cols">
+        <div>
+          <h2>Tracked players</h2>
+          <form class="inline" id="trackForm">
+            <input name="who" placeholder="Name or BattleMetrics link" aria-label="Player">
+            <input name="tag" placeholder="Tag (e.g. enemy)" size="12" aria-label="Tag">
+            <input name="color" type="color" value="#e0ad3e" aria-label="Tag colour">
+            <button>Track player</button>
+          </form>
+          <div id="trackedList"></div>
+        </div>
+        <div>
+          <h2>Online now <span class="muted" id="onlineCount"></span></h2>
+          <input id="onlineFilter" placeholder="Filter by name" aria-label="Filter players">
+          <div id="onlineList" class="scroll"></div>
+          <h2>Joins and leaves</h2>
+          <div id="activity" class="scroll short"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section data-panel="chat">
+    <div class="page chatpage">
+      <h1>Team chat</h1>
+      <div id="chatLog" class="chatlog"></div>
+      <form class="inline" id="chatForm"><input name="m" placeholder="Message your team, or type a command like !pop" autocomplete="off" aria-label="Message"><button>Send</button><button type="button" class="ghost" onclick="setTab('commands')">All commands</button></form>
+    </div>
+  </section>
+
+  <section data-panel="commands">
+    <div class="page">
+      <h1>Chat commands</h1>
+      <p class="muted">Anyone in your team can type these in in-game team chat while RustWatch is running. RustWatch replies in team chat. Click <b>Try</b> to see the reply here without posting it.</p>
+      <div class="inline"><input id="cmdFilter" placeholder="Search commands, e.g. heli, shop, switch" autocomplete="off" aria-label="Search commands"></div>
+      <div class="cmdwrap"><div id="cmdList"></div><aside id="cmdOut" class="cmdout" aria-live="polite"></aside></div>
+    </div>
+  </section>
+
+  <section data-panel="items">
+    <div class="page">
+      <h1>Items</h1>
+      <form class="inline" id="itemForm"><input name="q" placeholder="Item name, shortname or slang" autocomplete="off" aria-label="Item"><button>Look up</button></form>
+      <div class="cols"><div id="itemResults"></div><div id="itemDetail"></div></div>
+    </div>
+  </section>
+
+  <section data-panel="alerts">
+    <div class="page">
+      <h1>Alerts</h1>
+      <div class="inline"><select id="alertFilter" aria-label="Filter"><option value="">Everything</option></select><button id="clearLog" class="ghost">Clear list</button></div>
+      <div id="alertLog"></div>
+    </div>
+  </section>
+
+  <section data-panel="servers">
+    <div class="page">
+      <h1>Servers</h1>
+      <div id="steamBox"></div>
+      <h2>Paired servers</h2>
+      <div id="serverList"></div>
+      <details class="addbox"><summary>Add a server manually</summary>
+        <p class="muted">Only needed if you already have pairing details from another Rust+ tool.</p>
+        <form class="grid2" id="manualForm">
+          <label>Server IP<input name="ip"></label><label>App port<input name="port" placeholder="28082"></label>
+          <label>Your Steam ID<input name="pid"></label><label>Player token<input name="tok"></label>
+          <label>Name<input name="name" placeholder="optional"></label>
+          <label class="chk"><input type="checkbox" name="proxy"> Connect through Facepunch proxy</label>
+          <button>Add and connect</button>
+        </form>
+      </details>
+    </div>
+  </section>
+
+  <section data-panel="settings"><div class="page"><h1>Settings</h1><form id="settingsForm"></form></div></section>
+</main>
+
+<div id="tip" class="tip" role="tooltip"></div>
+<div id="toasts" class="toasts" aria-live="polite"></div>
+<script src="app.js"></script>
+</body>
+</html>
