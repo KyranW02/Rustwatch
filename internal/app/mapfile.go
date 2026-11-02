@@ -233,7 +233,8 @@ type MapFileData struct {
 	Size      uint32            `json:"size"`
 	Features  []rustmap.Feature `json:"features"`
 	Cargo     [][2]float32      `json:"cargo"`
-	RockNames map[string]string `json:"rockNames"`
+	RockNames map[string]string `json:"rockNames"`   // names you picked
+	Guesses   map[string]string `json:"rockGuesses"` // names worked out from the rock shapes
 	Version   int               `json:"version"`
 }
 
@@ -246,7 +247,7 @@ func (m *MapFiles) Data() MapFileData {
 	m.a.mu.Unlock()
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	d := MapFileData{State: m.state, File: m.file, Features: m.feats, Cargo: m.route, RockNames: names, Version: m.version}
+	d := MapFileData{State: m.state, File: m.file, Features: m.feats, Cargo: m.route, RockNames: names, Guesses: rustmap.RockGuesses, Version: m.version}
 	if d.Features == nil {
 		d.Features = []rustmap.Feature{}
 	}

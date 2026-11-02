@@ -31,6 +31,27 @@ func letter(name string) string {
 	return base[strings.LastIndex(base, "_")+1:]
 }
 
+// RockGuesses names the large rock models by their shape. Rust's files don't label them, so these
+// come from rebuilding each prefab (v3_rock_formations_large/rock_formation_a..j) from the game's
+// own meshes and comparing the shapes with what players call them:
+//
+//	A: biggest formation (65 m across, 38 m tall), rarest, large hollow inside you can build in
+//	E: second biggest, archway through the middle with a hollow inside each half
+//	F: smaller rock with a clear arch through it
+//	B: three tall flat-topped pillars; the middle one is anvil-shaped (narrow waist, wide top)
+//	D: C-shaped wall wrapped around an open yard
+//	I: low enclosed seat area backed by a tall 20 m block
+//
+// C, G, H and J are clusters of boulders with no notable build space. Players can rename any model.
+var RockGuesses = map[string]string{
+	"large_a": "God rock",
+	"large_e": "God rock (medium)",
+	"large_f": "Arch rock",
+	"large_b": "Anvil rock",
+	"large_d": "3-wall rock",
+	"large_i": "Throne rock",
+}
+
 // Features lists rock formations, caves, train tunnel entrances and icebergs.
 func (w *World) Features() []Feature {
 	var out []Feature

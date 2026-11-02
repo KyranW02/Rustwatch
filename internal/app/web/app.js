@@ -787,9 +787,11 @@ function overlayImg(name) {
   const im = mfImg[name];
   return im.complete && im.naturalWidth ? im : null;
 }
-const ROCK_NAMES = ["God rock", "Anvil rock", "Arch rock", "3-wall rock", "Throne rock", "Other big rock"];
-function rockName(f) { return MF && MF.rockNames && MF.rockNames[f.model]; }
-window.nameRock = (model, name) => api("/api/mapfile/rockname", { model, name }).then(() => { if (MF) { MF.rockNames[model] = name; if (!name) delete MF.rockNames[model]; } maps.overview.draw(); maps.full.draw(); $("#tip").style.display = "none"; pinnedTip = null; toast(name ? `Model ${model.split("_")[1].toUpperCase()} is now “${name}”` : "Name cleared", "Applies to every map."); }).catch((e) => toast("Couldn't save that", e.message, "alarm"));
+const ROCK_NAMES = ["God rock", "God rock (medium)", "Anvil rock", "Arch rock", "3-wall rock", "Throne rock", "Other big rock"];
+function rockPicked(f) { return MF && MF.rockNames && MF.rockNames[f.model]; }
+function rockGuess(f) { return MF && MF.rockGuesses && MF.rockGuesses[f.model]; }
+function rockName(f) { return rockPicked(f) || rockGuess(f); }
+window.nameRock = (model, name) => api("/api/mapfile/rockname", { model, name }).then(() => { if (MF) { MF.rockNames[model] = name; if (!name) delete MF.rockNames[model]; } maps.overview.draw(); maps.full.draw(); $("#tip").style.display = "none"; pinnedTip = null; toast(name ? `Model ${model.split("_")[1].toUpperCase()} is now “${name}”` : "Name reset", name ? "Applies to every map." : "Back to RustWatch's own guess, if it has one."); }).catch((e) => toast("Couldn't save that", e.message, "alarm"));
 const PIN_COLOURS = ["#e9d24a", "#3d8fe0", "#62c25a", "#d9483b", "#c25ad0", "#47c6c9"];
 const mapImg = new Image();
 let mapKey = "";
@@ -918,7 +920,7 @@ class MapView {
         const named = f.kind === "rock" && rockName(f), r = named ? 6 : 4.5;
         ctx.beginPath(); ctx.moveTo(x, y - r); ctx.lineTo(x + r, y + r * 0.8); ctx.lineTo(x - r, y + r * 0.8); ctx.closePath();
         ctx.fillStyle = f.kind === "iceberg" ? "#cfefff" : named ? "#f1c47a" : "#c9c1b4"; ctx.fill(); ctx.strokeStyle = "#101214"; ctx.lineWidth = 1.2; ctx.stroke();
-        if (named && this.scale > 1.1) outlinedText(ctx, named, x, y + 13, "#f1c47a", 11);
+        if (named && this.scale > 1.1) outlinedText(ctx, named + (rockPicked(f) ? "" : "?"), x, y + 13, "#f1c47a", 11);
         this.hits.push({ x, y, r: 7, tip: () => rockTip(f) });
       } else if (f.kind === "cave") {
         badge(ctx, x, y, 7, "#4b3a2c", "#e4dcd1"); ctx.fillStyle = "#e4dcd1"; ctx.beginPath(); ctx.arc(x, y + 2, 3.5, Math.PI, 0); ctx.fill();
@@ -1045,10 +1047,14 @@ class MapView {
   }
 }
 function rockTip(f) {
-  const model = f.model.split("_")[1].toUpperCase(), named = rockName(f);
-  return `<b>${esc(named || (f.kind === "iceberg" ? "Iceberg" : f.model.startsWith("arid") ? "Large desert rock" : "Large rock formation"))}</b> · ${esc(gridOf(f.x, f.y))}
-    ${f.kind === "rock" ? `<div class="muted">Model ${esc(model)}${f.model.startsWith("arid") ? " (desert)" : ""}${named ? "" : ". Rust doesn't label god rocks or anvils, so name this model once and every map shows it."}</div>
-    <div class="namerock">${ROCK_NAMES.map((n) => `<button type="button" class="${named === n ? "" : "ghost"} small" onclick="nameRock('${f.model}','${n}')">${n}</button>`).join("")}${named ? `<button type="button" class="link" onclick="nameRock('${f.model}','')">Clear</button>` : ""}</div>` : ""}`;
+  if (f.kind !== "rock") return `<b>Iceberg</b> · ${esc(gridOf(f.x, f.y))}`;
+  const model = f.model.split("_")[1].toUpperCase(), picked = rockPicked(f), guess = rockGuess(f), named = picked || guess;
+  const note = picked ? (guess && guess !== picked ? `You named it. RustWatch's guess was “${esc(guess)}”.` : "You named this model.")
+    : guess ? "Best guess from this rock's shape in Rust's own files. Pick another name if it's wrong in game."
+    : "Rust doesn't label god rocks or anvils, so name this model once and every map shows it.";
+  return `<b>${esc(named || (f.model.startsWith("arid") ? "Large desert rock" : "Large rock formation"))}${picked || !guess ? "" : "?"}</b> · ${esc(gridOf(f.x, f.y))}
+    <div class="muted">Model ${esc(model)}${f.model.startsWith("arid") ? " (desert)" : ""}. ${note}</div>
+    <div class="namerock">${ROCK_NAMES.map((n) => `<button type="button" class="${named === n ? "" : "ghost"} small" onclick="nameRock('${f.model}','${n}')">${n}</button>`).join("")}${picked ? `<button type="button" class="link" onclick="nameRock('${f.model}','')">${guess ? "Use guess" : "Clear"}</button>` : ""}</div>`;
 }
 function gridOf(x, y) {
   const ms = corrected(S.map.mapSize), n = Math.floor(ms / GRID);
