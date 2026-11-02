@@ -31,6 +31,15 @@ func (s *Server) StartQuery(addr string) (string, error) {
 				continue
 			}
 			on := s.onlinePlayers()
+			declared := len(on)
+			if s.CensorNames { // like server.censorplayerlist: stand-in names, and only part of the list
+				stand := []string{"adrian", "alice", "aliza", "amada", "angelena", "ardelle", "assunta", "benito", "beula", "bree"}
+				for i := range on {
+					on[i].name = stand[i%len(stand)]
+				}
+				declared = len(on) + 120
+				on = on[:len(on)/2]
+			}
 			var b bytes.Buffer
 			b.Write([]byte{0xFF, 0xFF, 0xFF, 0xFF})
 			switch req[4] {
@@ -40,7 +49,7 @@ func (s *Server) StartQuery(addr string) (string, error) {
 				b.Write([]byte{0, 0, byte(len(on)), 200, 0, 'd', 'w', 0, 1})
 				b.WriteString("2400\x00\x20mp200,cp147,qp3\x00")
 			case 0x55:
-				b.Write([]byte{0x44, byte(len(on))})
+				b.Write([]byte{0x44, byte(declared)})
 				for i, p := range on {
 					b.WriteByte(byte(i))
 					b.WriteString(p.name + "\x00")

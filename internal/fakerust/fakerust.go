@@ -37,19 +37,20 @@ type vm struct {
 }
 
 type Server struct {
-	mu       sync.Mutex
-	MapSize  uint32
-	members  []*member
-	vms      []*vm
-	switches map[uint32]bool
-	alarms   map[uint32]bool
-	conns    map[*ws.Conn]bool
-	start    time.Time
-	chat     [][]byte
-	Events   bool // simulate cargo / heli / chinook
-	jpg      []byte
-	listener net.Listener
-	Addr     string
+	mu          sync.Mutex
+	MapSize     uint32
+	members     []*member
+	vms         []*vm
+	switches    map[uint32]bool
+	alarms      map[uint32]bool
+	conns       map[*ws.Conn]bool
+	start       time.Time
+	chat        [][]byte
+	Events      bool // simulate cargo / heli / chinook
+	CensorNames bool // query port behaves like server.censorplayerlist
+	jpg         []byte
+	listener    net.Listener
+	Addr        string
 }
 
 func New() *Server {

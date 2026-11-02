@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -39,6 +40,9 @@ type Tracker struct {
 	bmMax      int
 	bmQueue    int
 	source     string // "direct" or "battlemetrics"
+	censored   bool   // server replaces real names with random ones (server.censorplayerlist)
+	shown      int    // names in the server's reply
+	total      int    // players the server says are online
 	queryAddr  string
 	key        string
 }
@@ -233,6 +237,7 @@ func (t *Tracker) poll() {
 		t.key, t.source, t.online, t.first, t.activity = key, source, map[string]*OnlinePlayer{}, true, nil
 		t.serverID, t.serverName, t.queryAddr = sc.BMServerID, "", sc.QueryAddr
 		t.status, t.lastPoll = "loading the player list…", time.Time{}
+		t.censored, t.shown, t.total = false, 0, 0
 	}
 	a.mu.Unlock()
 
@@ -342,7 +347,8 @@ func (t *Tracker) fetchDirect(ctx context.Context, sc *ServerConfig, name, ip st
 	t.queryAddr, t.serverName = addr, info.Name
 	t.bmPlayers, t.bmMax, t.bmQueue = info.Players, info.MaxPlayers, queue
 	a.mu.Unlock()
-	players, err := a2s.QueryPlayers(addr, 4*time.Second)
+	list, err := a2s.QueryPlayerList(addr, 4*time.Second)
+	players := list.Players
 	if errors.Is(err, a2s.ErrNoPlayerList) {
 		return nil, fmt.Errorf("this server answers server-browser queries but won't share its player list (%d online) — common on servers behind DDoS protection. Direct tracking can't see names here; a BattleMetrics API key in Settings is the alternative", info.Players)
 	}
@@ -364,6 +370,17 @@ func (t *Tracker) fetchDirect(ctx context.Context, sc *ServerConfig, name, ip st
 		}
 		cur[k] = seenPlayer{Name: n, Dur: p.Duration}
 	}
+	// what the server is willing to show: censored (random stand-in names) and/or a partial list
+	named := 0
+	for _, p := range players {
+		if isRandomName(p.Name) {
+			named++
+		}
+	}
+	a.mu.Lock()
+	t.censored = len(players) >= 3 && named*10 >= len(players)*8
+	t.shown, t.total = len(cur), max(info.Players, list.Declared)
+	a.mu.Unlock()
 	if len(players) == 0 && info.Players > 0 {
 		return nil, fmt.Errorf("this server hides its player list (%d players online), so direct tracking can't see names here — a BattleMetrics API key in Settings is the alternative", info.Players)
 	}
@@ -625,6 +642,9 @@ type TrackedView struct {
 type TrackerView struct {
 	ServerID   string        `json:"serverId"`
 	Source     string        `json:"source"`
+	Censored   bool          `json:"censored"`
+	Shown      int           `json:"shown"`
+	Total      int           `json:"total"`
 	QueryAddr  string        `json:"queryAddr"`
 	ServerName string        `json:"serverName"`
 	Status     string        `json:"status"`
@@ -657,7 +677,7 @@ func playtime(ss []Session, since time.Time, now time.Time) time.Duration {
 
 func (t *Tracker) viewLocked() TrackerView {
 	now := time.Now()
-	v := TrackerView{Source: t.source, QueryAddr: t.queryAddr, ServerID: t.serverID, ServerName: t.serverName, Status: t.status, Players: t.bmPlayers, MaxPlayers: t.bmMax, Queue: t.bmQueue}
+	v := TrackerView{Censored: t.censored, Shown: t.shown, Total: t.total, Source: t.source, QueryAddr: t.queryAddr, ServerID: t.serverID, ServerName: t.serverName, Status: t.status, Players: t.bmPlayers, MaxPlayers: t.bmMax, Queue: t.bmQueue}
 	if !t.lastPoll.IsZero() {
 		v.LastPoll = t.lastPoll.Unix()
 	}
@@ -805,3 +825,20 @@ func (a *App) SetQueryHint(addr string) error {
 	a.tracker.poke()
 	return nil
 }
+
+//go:embed data/randomnames.txt
+var randomNamesRaw string
+
+var randomNames = func() map[string]bool {
+	m := map[string]bool{}
+	for _, n := range strings.Split(randomNamesRaw, "\n") {
+		if n = strings.TrimSpace(n); n != "" {
+			m[n] = true
+		}
+	}
+	return m
+}()
+
+// isRandomName reports whether a name is one of Rust's stand-in names used when a server
+// censors its player list (or a player uses streamer mode).
+func isRandomName(n string) bool { return randomNames[strings.ToLower(strings.TrimSpace(n))] }

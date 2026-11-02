@@ -208,31 +208,44 @@ var ErrNoPlayerList = errors.New("the server doesn't answer player-list requests
 // QueryPlayers returns everyone currently on the server with how long they've been connected.
 // It retries a few times because a lost UDP packet in a big, split reply means starting over.
 func QueryPlayers(addr string, timeout time.Duration) ([]Player, error) {
+	l, err := QueryPlayerList(addr, timeout)
+	return l.Players, err
+}
+
+// PlayerList is a player-list reply. Declared is how many players the server said it was
+// sending; servers sometimes only fit part of the list in their reply.
+type PlayerList struct {
+	Players  []Player
+	Declared int
+}
+
+// QueryPlayerList is QueryPlayers plus the server's declared player count.
+func QueryPlayerList(addr string, timeout time.Duration) (PlayerList, error) {
 	var lastErr error
 	for attempt := 0; attempt < 3; attempt++ {
-		ps, err := queryPlayersOnce(addr, timeout+time.Duration(attempt)*2*time.Second)
+		l, err := queryPlayersOnce(addr, timeout+time.Duration(attempt)*2*time.Second)
 		if err == nil {
-			return ps, nil
+			return l, nil
 		}
 		lastErr = err
 		time.Sleep(time.Duration(300*(attempt+1)) * time.Millisecond)
 	}
 	var ne net.Error
 	if errors.As(lastErr, &ne) && ne.Timeout() && !strings.Contains(lastErr.Error(), "split packets") {
-		return nil, ErrNoPlayerList
+		return PlayerList{}, ErrNoPlayerList
 	}
-	return nil, lastErr
+	return PlayerList{}, lastErr
 }
 
-func queryPlayersOnce(addr string, timeout time.Duration) ([]Player, error) {
+func queryPlayersOnce(addr string, timeout time.Duration) (PlayerList, error) {
 	c, err := dial(addr, timeout)
 	if err != nil {
-		return nil, err
+		return PlayerList{}, err
 	}
 	defer c.c.Close()
 	resp, err := c.request([]byte{0x55, 0xFF, 0xFF, 0xFF, 0xFF}, 0x44, false)
 	if err != nil {
-		return nil, err
+		return PlayerList{}, err
 	}
 	r := reader{bytes.NewReader(resp)}
 	n := int(r.u8())
@@ -246,5 +259,5 @@ func queryPlayersOnce(addr string, timeout time.Duration) ([]Player, error) {
 		}
 		out = append(out, p)
 	}
-	return out, nil
+	return PlayerList{Players: out, Declared: n}, nil
 }

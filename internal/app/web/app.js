@@ -334,8 +334,12 @@ function renderPlayers() {
 
   const f = $("#onlineFilter").value.trim().toLowerCase();
   const on = (T.online || []).filter((p) => !f || p.name.toLowerCase().includes(f));
-  $("#onlineCount").textContent = `(${(T.online || []).length})`;
-  $("#onlineList").innerHTML = `<table><tbody>${on.map((p) => `<tr><td>${p.tracked ? `<span class="tag" style="background:${esc(p.color || "#e0ad3e")}">${esc(p.tag || "tracked")}</span>` : ""}${esc(p.name)}</td><td class="num muted">${esc(p.onlineFor)}</td><td style="text-align:right">${p.tracked ? "" : `<button class="ghost small" onclick="quickTrack('${p.id}','${esc(p.name)}')">Track</button>`}</td></tr>`).join("")}</tbody></table>` + (on.length ? "" : `<div class="empty-note">${ok ? "No players match." : "Waiting for the player list…"}</div>`);
+  const cnt = (T.online || []).length;
+  $("#onlineCount").textContent = T.total && T.shown && T.shown < T.total - 2 ? `(${cnt} of ${T.total})` : `(${cnt})`;
+  let note = "";
+  if (T.censored) note += `<div class="emptybox" style="margin-bottom:10px"><b>This server hides real player names.</b><p>It uses Rust's <code>server.censorplayerlist</code> setting, so the names below are random stand-ins, not Steam names. BattleMetrics sees the same random names, so an API key won't help here. Players tracked by their real name won't be matched on this server. You can track a stand-in name, but it only follows that person as long as the server keeps giving them the same one.</p></div>`;
+  if (T.total && T.shown && T.shown < T.total - 2) note += `<div class="muted" style="font-size:13px;margin-bottom:8px">The server only sent ${T.shown} of its ${T.total} players — its reply is cut short, so some players never appear here.</div>`;
+  $("#onlineList").innerHTML = note + `<table><tbody>${on.map((p) => `<tr><td>${p.tracked ? `<span class="tag" style="background:${esc(p.color || "#e0ad3e")}">${esc(p.tag || "tracked")}</span>` : ""}${esc(p.name)}</td><td class="num muted">${esc(p.onlineFor)}</td><td style="text-align:right">${p.tracked ? "" : `<button class="ghost small" onclick="quickTrack('${p.id}','${esc(p.name)}')">Track</button>`}</td></tr>`).join("")}</tbody></table>` + (on.length ? "" : `<div class="empty-note">${ok ? "No players match." : "Waiting for the player list…"}</div>`);
   $("#activity").innerHTML = (T.activity || []).map((a) => `<div class="act"><span class="muted">${clock(a.time)}</span> <span class="${a.joined ? "j" : "l"}">${a.joined ? "joined" : "left"}</span> ${a.tag ? `<span class="tag" style="background:var(--event)">${esc(a.tag)}</span>` : ""}${esc(a.name)}</div>`).join("") || `<div class="empty-note">Joins and leaves appear here after the next update.</div>`;
 }
 $("#onlineFilter").addEventListener("input", renderPlayers);
