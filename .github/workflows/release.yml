@@ -1,9 +1,11 @@
-# Builds, tests and publishes a release whenever a version tag (v1.2.3) is pushed.
+# Builds, tests and publishes a release. Start it from GitHub: Actions → Release → Run workflow
+# (it releases the version in internal/app/app.go), or by pushing a version tag like v1.2.3.
 # The release description comes from that version's section in CHANGELOG.md
-# (falling back to the commit messages since the previous tag).
+# (falling back to the commit messages since the previous release).
 name: Release
 
 on:
+  workflow_dispatch:
   push:
     tags: ["v*"]
 
@@ -22,14 +24,20 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Check the tag matches the app version
+      - name: Work out the version
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          tag="${GITHUB_REF_NAME#v}"
           ver=$(grep -oP 'const Version = "\K[^"]+' internal/app/app.go)
-          if [ "$tag" != "$ver" ]; then
-            echo "::error::Tag v$tag doesn't match Version \"$ver\" in internal/app/app.go"
+          if [ "$GITHUB_REF_TYPE" = "tag" ] && [ "${GITHUB_REF_NAME#v}" != "$ver" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME doesn't match Version \"$ver\" in internal/app/app.go"
             exit 1
           fi
+          if gh release view "v$ver" >/dev/null 2>&1; then
+            echo "::error::v$ver is already released — bump Version in internal/app/app.go first"
+            exit 1
+          fi
+          echo "VER=$ver" >> "$GITHUB_ENV"
 
       - name: Test
         run: go test ./...
@@ -43,11 +51,11 @@ jobs:
 
       - name: Write release notes
         run: |
-          ver="${GITHUB_REF_NAME#v}"
+          ver="$VER"
           awk -v v="## v$ver" '$0 ~ "^## " { if (found) exit; if (index($0, v) == 1) { found = 1; next } } found' CHANGELOG.md > notes.md || true
           if [ ! -s notes.md ]; then
-            prev=$(git describe --tags --abbrev=0 "$GITHUB_REF_NAME^" 2>/dev/null || true)
-            range="${prev:+$prev..}$GITHUB_REF_NAME"
+            prev=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || true)
+            range="${prev:+$prev..}HEAD"
             git log --no-merges --pretty='- %s' "$range" > notes.md
           fi
           {
@@ -63,5 +71,5 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" dist/RustWatch.exe dist/RustWatch.exe.sha256 \
-            --title "RustWatch ${GITHUB_REF_NAME#v}" --notes-file notes.md --verify-tag
+          gh release create "v$VER" dist/RustWatch.exe dist/RustWatch.exe.sha256 \
+            --target "$GITHUB_SHA" --title "RustWatch $VER" --notes-file notes.md

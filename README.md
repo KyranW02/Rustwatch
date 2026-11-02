@@ -54,7 +54,7 @@ Not included: Rustalytics' paid partner-server stat lookups and 24/7 cloud hosti
 
 RustWatch checks this repo's [Releases](https://github.com/KyranW02/rustwatch/releases) every 6 hours (Settings → Updates). When a newer version is published it shows an **Update to x.y.z** button; clicking **Update now** downloads `RustWatch.exe`, checks it against `RustWatch.exe.sha256` from the same release, swaps it in and restarts. Nothing installs without that click.
 
-Publishing a release is automatic: bump `Version` in `internal/app/app.go`, add a `## v<Version>` section to `CHANGELOG.md`, commit, and push a tag `v<Version>`. GitHub Actions ([release.yml](.github/workflows/release.yml)) runs the tests, builds `RustWatch.exe` and `RustWatch.exe.sha256` on GitHub, and publishes the release with that changelog section as its description.
+Publishing a release is automatic: bump `Version` in `internal/app/app.go`, add a `## v<Version>` section to `CHANGELOG.md`, commit and push, then on GitHub open **Actions → Release → Run workflow** (or push a tag `v<Version>`). GitHub Actions ([release.yml](.github/workflows/release.yml)) runs the tests, builds `RustWatch.exe` and `RustWatch.exe.sha256` on GitHub, and publishes the release with that changelog section as its description.
 
 ## Building from source
 
