@@ -20,6 +20,7 @@ type Info struct {
 	MaxPlayers int
 	Bots       int
 	Keywords   string
+	SteamID    uint64 // the server's Steam ID (0 if it didn't send one)
 }
 
 type Player struct {
@@ -188,7 +189,7 @@ func QueryInfo(addr string, timeout time.Duration) (*Info, error) {
 			r.u16()
 		}
 		if edf&0x10 != 0 {
-			r.b.Seek(8, 1)
+			binary.Read(r.b, binary.LittleEndian, &in.SteamID)
 		}
 		if edf&0x40 != 0 {
 			r.u16()

@@ -268,6 +268,9 @@ func (t *Tracker) mergeSteamLocked(sc *ServerConfig, cur map[string]seenPlayer, 
 		if !ok || !pr.Here {
 			continue
 		}
+		if _, ok := cur["s:"+tp.SteamID]; ok {
+			continue // already in the Steam client's list
+		}
 		sp := seenPlayer{Name: tp.Name}
 		for _, n := range []string{pr.Name, tp.Name} {
 			if n == "" {

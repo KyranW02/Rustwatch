@@ -79,6 +79,8 @@ func main() {
 		go http.Serve(stats, fs.SteamStats())
 		a.DemoSetup("http://" + stats.Addr().String())
 		qaddr, _ := fs.StartQuery("127.0.0.1:0")
+		fs.CensorNames = true                   // like most real servers: the public list has stand-in names…
+		a.DemoLocalSteam(fs.OnlineSteam, qaddr) // …but the Steam client knows who's really there
 		host, p, _ := net.SplitHostPort(fs.Addr)
 		pn, _ := strconv.Atoi(p)
 		a.AddServer(app.ServerConfig{Name: "Demo server", IP: host, Port: pn, PlayerID: "76561198000000001", PlayerToken: 1234, QueryHint: qaddr,

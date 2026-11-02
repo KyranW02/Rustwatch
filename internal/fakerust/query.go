@@ -47,7 +47,9 @@ func (s *Server) StartQuery(addr string) (string, error) {
 				b.Write([]byte{0x49, 17})
 				b.WriteString("[EU] RustWatch Demo Server | Monthly\x00Procedural Map\x00rust\x00Rust\x00")
 				b.Write([]byte{0, 0, byte(len(on)), 200, 0, 'd', 'w', 0, 1})
-				b.WriteString("2400\x00\x20mp200,cp147,qp3\x00")
+				b.WriteString("2400\x00\x30")
+				binary.Write(&b, binary.LittleEndian, DemoServerSteamID)
+				b.WriteString("mp200,cp147,qp3\x00")
 			case 0x55:
 				b.Write([]byte{0x44, byte(declared)})
 				for i, p := range on {
@@ -63,6 +65,18 @@ func (s *Server) StartQuery(addr string) (string, error) {
 		}
 	}()
 	return pc.LocalAddr().String(), nil
+}
+
+// DemoServerSteamID is the Steam ID the demo server reports in its query reply.
+const DemoServerSteamID uint64 = 90000000000000001
+
+// DemoSteamIDs are the Steam IDs of the demo's online players, for the fake Steam client list.
+func (s *Server) OnlineSteam() [][2]string {
+	var out [][2]string
+	for _, p := range s.onlinePlayers() {
+		out = append(out, [2]string{"7656119800000" + p.id, p.name})
+	}
+	return out
 }
 
 type fakePlayer struct {

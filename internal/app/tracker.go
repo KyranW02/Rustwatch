@@ -51,6 +51,12 @@ type Tracker struct {
 	steamErr    string
 	herePorts   map[int]bool // extra game ports confirmed to be this server
 	portChecked map[int]bool
+
+	local         localSteamReader  // the Steam client's list for the server you're in (Windows)
+	localMode     bool              // the online list currently comes from the Steam client
+	localState    string            // why the Steam client list is or isn't used
+	names         map[string]string // steamId -> Steam name cache
+	serverSteamID uint64            // the active server's Steam ID, from its query reply
 }
 
 type OnlinePlayer struct {
@@ -71,7 +77,8 @@ type Activity struct {
 func newTracker(a *App) *Tracker {
 	return &Tracker{a: a, pokeCh: make(chan struct{}, 1), http: &http.Client{Timeout: 25 * time.Second},
 		baseURL: "https://api.battlemetrics.com", online: map[string]*OnlinePlayer{}, first: true, status: "idle",
-		steam: map[string]steamPresence{}, herePorts: map[int]bool{}, portChecked: map[int]bool{}}
+		steam: map[string]steamPresence{}, herePorts: map[int]bool{}, portChecked: map[int]bool{},
+		names: map[string]string{}, local: newLocalSteam()}
 }
 
 func (t *Tracker) poke() {
@@ -246,7 +253,9 @@ func (t *Tracker) poll() {
 		t.status, t.lastPoll = "loading the player list…", time.Time{}
 		t.censored, t.shown, t.total = false, 0, 0
 		t.steam, t.steamErr, t.herePorts, t.portChecked = map[string]steamPresence{}, "", map[int]bool{}, map[int]bool{}
+		t.localMode, t.localState, t.names, t.serverSteamID = false, "", map[string]string{}, 0
 	}
+	local, hint := t.local, t.serverSteamID
 	steamKey := a.cfg.Settings.SteamAPIKey
 	t.steamOn = steamKey != ""
 	var steamIDs []string
@@ -269,6 +278,14 @@ func (t *Tracker) poll() {
 			pres, serr = t.steamPoll(ctx, sc, steamKey, steamIDs, sa)
 		}
 	}()
+	var snap localSnap
+	localDone := make(chan struct{})
+	go func() {
+		defer close(localDone)
+		if local != nil {
+			snap = local.Snapshot(hint)
+		}
+	}()
 	var cur map[string]seenPlayer
 	var err error
 	if useBM {
@@ -277,7 +294,15 @@ func (t *Tracker) poll() {
 		cur, err = t.fetchDirect(ctx, sc, name, ip)
 	}
 	<-steamDone
-	if err != nil && pres == nil {
+	<-localDone
+	useLocal, localState := t.judgeLocal(snap, sa, local != nil)
+	if useLocal {
+		t.fillNames(ctx, steamKey, snap.Players)
+	}
+	if err != nil && pres == nil && !useLocal {
+		a.mu.Lock()
+		t.localState = localState
+		a.mu.Unlock()
 		t.setStatus(err.Error())
 		return
 	}
@@ -289,7 +314,15 @@ func (t *Tracker) poll() {
 	if a.srv != sc || t.source != source {
 		return
 	}
-	if err != nil {
+	t.localState = localState
+	if useLocal != t.localMode { // the list's keys change: start over quietly instead of mass joins/leaves
+		t.localMode, t.online, t.first = useLocal, map[string]*OnlinePlayer{}, true
+	}
+	if useLocal {
+		cur = t.localListLocked(sc, snap.Players, cur)
+		t.shown = len(cur)
+		err = nil
+	} else if err != nil {
 		// the player list failed but Steam answered: keep the list as it was, update Steam players
 		cur = map[string]seenPlayer{}
 		for k, p := range t.online {
@@ -433,6 +466,9 @@ func (t *Tracker) fetchDirect(ctx context.Context, sc *ServerConfig, name, ip st
 	a.mu.Lock()
 	t.censored = len(players) >= 3 && named*10 >= len(players)*8
 	t.shown, t.total = len(cur), max(info.Players, list.Declared)
+	if info.SteamID != 0 {
+		t.serverSteamID = info.SteamID
+	}
 	a.mu.Unlock()
 	if len(players) == 0 && info.Players > 0 {
 		return nil, fmt.Errorf("this server hides its player list (%d players online), so names can't be matched here — players tracked by Steam profile are still followed", info.Players)
@@ -526,7 +562,7 @@ func (t *Tracker) apply(sc *ServerConfig, cur map[string]seenPlayer) {
 	tracked := map[string]*TrackedPlayer{}
 	for i := range sc.Tracked {
 		tp := &sc.Tracked[i]
-		if tp.SteamID != "" && t.steamOn {
+		if tp.SteamID != "" && t.bySteam() {
 			tracked["s:"+tp.SteamID] = tp
 			continue
 		}
@@ -649,7 +685,7 @@ func (t *Tracker) onlineCount() int { return len(t.online) }
 
 // keyFor is the key a tracked player has in t.online for the current source.
 func (t *Tracker) keyFor(tp *TrackedPlayer) string {
-	if tp.SteamID != "" && t.steamOn {
+	if tp.SteamID != "" && t.bySteam() {
 		return "s:" + tp.SteamID
 	}
 	if t.source == "direct" {
@@ -706,6 +742,8 @@ type TrackerView struct {
 	Source     string        `json:"source"`
 	Censored   bool          `json:"censored"`
 	SteamOn    bool          `json:"steamOn"`
+	LocalMode  bool          `json:"localMode"`
+	LocalState string        `json:"localState"`
 	SteamErr   string        `json:"steamErr"`
 	Shown      int           `json:"shown"`
 	Total      int           `json:"total"`
@@ -741,7 +779,7 @@ func playtime(ss []Session, since time.Time, now time.Time) time.Duration {
 
 func (t *Tracker) viewLocked() TrackerView {
 	now := time.Now()
-	v := TrackerView{SteamOn: t.steamOn, SteamErr: t.steamErr, Censored: t.censored, Shown: t.shown, Total: t.total, Source: t.source, QueryAddr: t.queryAddr, ServerID: t.serverID, ServerName: t.serverName, Status: t.status, Players: t.bmPlayers, MaxPlayers: t.bmMax, Queue: t.bmQueue}
+	v := TrackerView{LocalMode: t.localMode, LocalState: t.localState, SteamOn: t.steamOn, SteamErr: t.steamErr, Censored: t.censored, Shown: t.shown, Total: t.total, Source: t.source, QueryAddr: t.queryAddr, ServerID: t.serverID, ServerName: t.serverName, Status: t.status, Players: t.bmPlayers, MaxPlayers: t.bmMax, Queue: t.bmQueue}
 	if !t.lastPoll.IsZero() {
 		v.LastPoll = t.lastPoll.Unix()
 	}
@@ -816,6 +854,9 @@ func (a *App) Track(tp TrackedPlayer) error {
 	a.mu.Lock()
 	key := a.cfg.Settings.SteamAPIKey
 	a.mu.Unlock()
+	if strings.HasPrefix(tp.BMID, "s:") { // "Track" pressed on a player from the Steam client's list
+		tp.SteamID, tp.BMID = tp.BMID[2:], ""
+	}
 	if raw := strings.TrimSpace(tp.SteamID); raw != "" {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		id, err := resolveSteamID(ctx, key, raw)

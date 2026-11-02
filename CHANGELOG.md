@@ -3,6 +3,7 @@
 Each version's section becomes the description of its GitHub release.
 
 ## v1.2.0
+- **Real player names while you're in the game.** When Rust is running and you're on the server, RustWatch reads the player list your Steam client already has, the same list as Shift+Tab → Players, with real Steam names and IDs, even on servers that hide names publicly. People you track by name are linked to their Steam profile automatically when they show up there. When you leave the game, it goes back to the server's own list. RustWatch only connects to Steam while Rust is running and never touches the game itself.
 - **Track players by Steam profile.** Paste someone's Steam profile link into *Track player*, or press **Link Steam** on someone you already track. RustWatch checks Steam every minute to see which server they're on, so it works on servers that hide real names (Rust's `server.censorplayerlist`, on by default), on servers that won't share their player list, and after a name change. It needs the free Steam Web API key (Settings → Kills) and a public Steam profile.
 - Each Steam-linked player shows what Steam says they're doing: on this server, in Rust on another server, offline, or a private profile.
 - Fixed the hidden-names notice: BattleMetrics *can* show real names when the server owner has given it admin access, but that feed isn't public.

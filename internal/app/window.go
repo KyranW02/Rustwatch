@@ -11,7 +11,14 @@ import (
 
 var quitOnce sync.Once
 
-func (a *App) shutdown() { quitOnce.Do(func() { close(a.quit) }) }
+func (a *App) shutdown() {
+	quitOnce.Do(func() {
+		if a.tracker != nil && a.tracker.local != nil {
+			a.tracker.local.Close() // let go of Steam before exiting
+		}
+		close(a.quit)
+	})
+}
 
 // OpenWindow opens the app UI in a standalone window. When the last window closes the
 // app exits, unless "keep running in background" is enabled in Settings.
