@@ -30,7 +30,7 @@ var alertKinds = []struct {
 	{"bradley", "Bradley destroyed / respawn", true, true},
 	{"vendor", "Travelling vendor", true, true},
 	{"excavator", "Giant excavator started (heard)", true, true},
-	{"deepsea", "Deep Sea (heard)", true, true},
+	{"deepsea", "Deep Sea alarm (heard)", true, true},
 	{"event_window", "Heli / cargo / chinook due any minute", true, false},
 	{"vending_new", "New vending machine", false, false},
 	{"vending_watch", "Watched item for sale", true, true},

@@ -139,6 +139,7 @@ type Score struct {
 	Ratio  float64 // share of the reference's peaks found in the live audio
 	Z      float64 // how far that stands above chance (other offsets)
 	Excess float64 // (Ratio - chance) / (1 - chance), chance from how busy each frequency is
+	Peaks  int     // the reference's peak count (longer, richer cues give more reliable scores)
 	Offset int     // frame in the analysed audio where the reference starts
 }
 
@@ -150,7 +151,17 @@ var (
 )
 
 // Detected reports whether a score is a confident match.
-func (s Score) Detected() bool { return s.Ratio >= MinRatio && s.Excess >= MinExcess && s.Z >= MinZ }
+//
+// Long, rich cues (the game's event stings run 6–15 s) can be trusted at a lower match because
+// chance can't line up that many peaks at one offset: on 5 minutes of busy game audio (guns, C4,
+// engines, music, wind) the best chance score for any long cue was excess×z ≈ 0.45, while the
+// real cues mixed 10 dB under that audio scored 1.2–1.7.
+func (s Score) Detected() bool {
+	if s.Excess >= MinExcess && s.Z >= MinZ && s.Ratio >= MinRatio {
+		return true
+	}
+	return s.Peaks >= 1500 && s.Excess >= 0.12 && s.Excess*s.Z >= 1.0
+}
 
 // Match scores every reference against fingerprinted audio, best first.
 func (m *Matcher) Match(live Fingerprint) []Score {
@@ -235,7 +246,7 @@ func (m *Matcher) Match(live Fingerprint) []Score {
 		if chance < 1 {
 			excess = (best - chance) / (1 - chance)
 		}
-		out = append(out, Score{Ref: ri, Ratio: best, Z: z, Excess: excess, Offset: bl})
+		out = append(out, Score{Ref: ri, Ratio: best, Z: z, Excess: excess, Offset: bl, Peaks: total})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Excess > out[j].Excess })
 	return out

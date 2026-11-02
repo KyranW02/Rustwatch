@@ -133,7 +133,7 @@ function renderStrip() {
   $("#strip").innerHTML = h;
 }
 
-const EVENT_ROWS = [["cargo", "Cargo"], ["heli", "Heli"], ["chinook", "Chinook"], ["smallOil", "Small rig"], ["largeOil", "Large rig"], ["bradley", "Bradley"], ["vendor", "Vendor"], ["excavator", "Excavator"], ["deepsea", "Deep Sea"]];
+const EVENT_ROWS = [["cargo", "Cargo"], ["heli", "Heli"], ["chinook", "Chinook"], ["smallOil", "Small rig"], ["largeOil", "Large rig"], ["oilHeard", "Oil rigs (heard)"], ["bradley", "Bradley"], ["vendor", "Vendor"], ["excavator", "Excavator"], ["deepsea", "Deep Sea"]];
 function renderOverview() {
   maps.overview.draw();
   if (!S.active) {

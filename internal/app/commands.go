@@ -119,7 +119,7 @@ func (a *App) Command(sender uint64, line string) string {
 		}
 		return strings.Join(parts, " | ")
 	case "oil":
-		return ev.SmallOilStatus() + " " + ev.LargeOilStatus()
+		return strings.TrimSpace(ev.SmallOilStatus() + " " + ev.LargeOilStatus() + " " + ev.OilHeardStatus())
 	case "smoil", "small":
 		return ev.SmallOilStatus()
 	case "loil", "large":

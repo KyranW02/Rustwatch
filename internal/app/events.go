@@ -49,6 +49,10 @@ type EventEngine struct {
 	VendorHeard    time.Time
 	ExcavatorHeard time.Time
 	DeepSeaHeard   time.Time
+	DeepSeaClosing time.Time
+	OilReset       time.Time
+	OilCalled      time.Time // an oil rig alarm heard nearby (which rig isn't known)
+	oilCalledDone  bool
 }
 
 type tracked struct {
@@ -274,6 +278,10 @@ func (e *EventEngine) Tick() {
 		e.oilLargeDone = true
 		e.emit("oilrig", "Large Oil Rig crate unlocked", "Large Oil Rig locked crate is now unlocked")
 	}
+	if !e.OilCalled.IsZero() && !e.oilCalledDone && now.Sub(e.OilCalled) >= e.LockedCrate {
+		e.oilCalledDone = true
+		e.emit("oilrig", "Oil rig crate unlocked", "The oil rig crate you heard being triggered should now be unlocked")
+	}
 	if !e.BradleyDown.IsZero() && !e.bradleyNoted && now.Sub(e.BradleyDown) >= e.BradleyRespawn {
 		e.bradleyNoted = true
 		e.emit("bradley", "Bradley should be back", "Bradley APC should have respawned at Launch Site")
@@ -336,12 +344,21 @@ func (e *EventEngine) Heard(cue string) {
 		}
 		e.VendorHeard = now
 		e.emit("vendor", "Travelling vendor heard", "Heard the Travelling Vendor nearby")
+	case "oil_reset":
+		e.OilReset = now
+		e.emit("oilrig", "Oil rig reset", "Heard an oil rig reset: fresh crate and scientists are back.")
+	case "oil_called":
+		e.OilCalled, e.oilCalledDone = now, false
+		e.emit("oilrig", "Oil rig alarm", fmt.Sprintf("Heard an oil rig alarm nearby. Crate unlocks in about %d min.", int(e.LockedCrate.Minutes())))
+	case "deepsea_close":
+		e.DeepSeaClosing = now
+		e.emit("deepsea", "Deep Sea closing", "Heard the Deep Sea closing alarm.")
 	case "excavator":
 		e.ExcavatorHeard = now
 		e.emit("excavator", "Giant excavator started", "Heard the giant excavator start up")
 	case "deepsea":
 		e.DeepSeaHeard = now
-		e.emit("deepsea", "Deep Sea", "Heard the Deep Sea cue")
+		e.emit("deepsea", "Deep Sea alarm", "Heard the Deep Sea alarm: it's opening or about to close")
 	}
 }
 
@@ -364,10 +381,31 @@ func (e *EventEngine) ExcavatorStatus() string {
 }
 
 func (e *EventEngine) DeepSeaStatus() string {
-	if e.DeepSeaHeard.IsZero() {
-		return "Deep Sea: not heard since RustWatch started."
+	now := e.Now()
+	switch {
+	case !e.DeepSeaClosing.IsZero() && e.DeepSeaClosing.After(e.DeepSeaHeard):
+		return "Deep Sea: closing alarm heard " + ago(e.DeepSeaClosing, now) + "."
+	case !e.DeepSeaHeard.IsZero():
+		return "Deep Sea: alarm heard " + ago(e.DeepSeaHeard, now) + " (opening or closing)."
 	}
-	return "Deep Sea: heard " + ago(e.DeepSeaHeard, e.Now()) + "."
+	return "Deep Sea: not heard since RustWatch started."
+}
+
+// OilHeardStatus describes oil rig sounds heard (reset / alarm), "" if none.
+func (e *EventEngine) OilHeardStatus() string {
+	now := e.Now()
+	var parts []string
+	if !e.OilCalled.IsZero() {
+		s := "Oil rig alarm heard " + ago(e.OilCalled, now)
+		if left := e.LockedCrate - now.Sub(e.OilCalled); left > 0 {
+			s += fmt.Sprintf(", crate unlocks in %s", fmtDur(left))
+		}
+		parts = append(parts, s+".")
+	}
+	if !e.OilReset.IsZero() {
+		parts = append(parts, "An oil rig reset "+ago(e.OilReset, now)+".")
+	}
+	return strings.Join(parts, " ")
 }
 
 // Status lines used by chat commands and the dashboard.
@@ -483,6 +521,7 @@ type EventSummary struct {
 	Bradley   string   `json:"bradley"`
 	Vendor    string   `json:"vendor"`
 	Excavator string   `json:"excavator"`
+	OilHeard  string   `json:"oilHeard"`
 	DeepSea   string   `json:"deepsea"`
 	Active    []string `json:"active"`
 }
@@ -490,7 +529,10 @@ type EventSummary struct {
 func (e *EventEngine) Summary() EventSummary {
 	s := EventSummary{Cargo: e.CargoStatus(), Heli: e.HeliStatus(), Chinook: e.ChinookStatus(),
 		Small: e.SmallOilStatus(), Large: e.LargeOilStatus(), Bradley: e.BradleyStatus(), Vendor: e.VendorStatus(),
-		Excavator: e.ExcavatorStatus(), DeepSea: e.DeepSeaStatus()}
+		Excavator: e.ExcavatorStatus(), DeepSea: e.DeepSeaStatus(), OilHeard: e.OilHeardStatus()}
+	if s.OilHeard == "" {
+		s.OilHeard = "No oil rig sounds heard yet."
+	}
 	now := e.Now()
 	if len(e.cargo) > 0 || (!e.CargoHeard.IsZero() && now.Sub(e.CargoHeard) < e.CargoEgress+10*time.Minute) {
 		s.Active = append(s.Active, "cargo")

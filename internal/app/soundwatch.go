@@ -31,10 +31,12 @@ var soundEvents = []struct {
 	Cooldown         time.Duration
 }{
 	{"cargo", "Cargo ship", "The horn when the cargo ship comes in.", 20 * time.Minute},
-	{"oil_small", "Small Oil Rig called", "The sound when someone triggers Small Oil Rig and heavy scientists are called in.", 10 * time.Minute},
-	{"oil_large", "Large Oil Rig called", "The sound when someone triggers Large Oil Rig and heavy scientists are called in.", 10 * time.Minute},
+	{"oil_reset", "Oil rig reset", "The server-wide sound when an oil rig resets with fresh loot and scientists.", 10 * time.Minute},
+	{"oil_called", "Oil rig alarm", "The alarm at an oil rig when someone triggers it. Only heard nearby.", 10 * time.Minute},
+	{"oil_small", "Small Oil Rig called", "A sound you recorded when Small Oil Rig was triggered.", 10 * time.Minute},
+	{"oil_large", "Large Oil Rig called", "A sound you recorded when Large Oil Rig was triggered.", 10 * time.Minute},
 	{"excavator", "Giant excavator started", "The sound when someone starts the giant excavator.", 10 * time.Minute},
-	{"deepsea", "Deep Sea", "The cue when Deep Sea opens.", 30 * time.Minute},
+	{"deepsea", "Deep Sea alarm", "The Deep Sea alarm. Rust plays the same alarm when Deep Sea opens and when it's closing.", 20 * time.Minute},
 	{"bradley", "Bradley destroyed", "The explosion when Bradley is destroyed. Only heard nearby.", 10 * time.Minute},
 	{"heli_down", "Patrol heli shot down", "The crash when the patrol heli goes down. Only heard nearby.", 10 * time.Minute},
 	{"vendor", "Travelling vendor", "The travelling vendor's horn. Only heard nearby.", 10 * time.Minute},
@@ -220,7 +222,18 @@ func (w *SoundWatch) last(sec float64) []float32 {
 func (w *SoundWatch) detectLoop() {
 	t := time.NewTicker(time.Second)
 	defer t.Stop()
+	var dirSig string
+	tick := 0
 	for range t.C {
+		if tick++; tick%10 == 0 { // cues copied into the sounds folder are picked up without a restart
+			if sig := w.dirSignature(); sig != dirSig {
+				if dirSig != "" {
+					w.loadCues()
+					w.a.publish("update", nil)
+				}
+				dirSig = sig
+			}
+		}
 		lv := sound.RMS(w.last(0.5))
 		w.mu.Lock()
 		w.level = lv
@@ -251,13 +264,19 @@ func (w *SoundWatch) check(m *sound.Matcher, win []float32) []string {
 		ratio float64
 	}
 	var hits []hit
+	best := -1.0
+	for _, s := range scores {
+		if s.Detected() && s.Excess*s.Z > best {
+			best = s.Excess * s.Z
+		}
+	}
 	for _, s := range scores {
 		ev := strings.SplitN(m.Refs[s.Ref].ID, "-", 2)[0]
 		if s.Excess > w.lastBest[ev] {
 			w.lastBest[ev] = s.Excess
 		}
-		if !s.Detected() {
-			continue
+		if !s.Detected() || s.Excess*s.Z < best {
+			continue // only the strongest match in a window counts
 		}
 		cd := 10 * time.Minute
 		for _, e := range soundEvents {
@@ -294,6 +313,17 @@ func (w *SoundWatch) check(m *sound.Matcher, win []float32) []string {
 }
 
 // ---- saved cues ----
+
+func (w *SoundWatch) dirSignature() string {
+	ents, _ := os.ReadDir(w.dir)
+	var b strings.Builder
+	for _, e := range ents {
+		if fi, err := e.Info(); err == nil {
+			fmt.Fprintf(&b, "%s:%d:%d;", e.Name(), fi.Size(), fi.ModTime().UnixNano())
+		}
+	}
+	return b.String()
+}
 
 func (w *SoundWatch) loadCues() {
 	os.MkdirAll(w.dir, 0o755)
