@@ -6,8 +6,10 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"math"
 	"net"
+	"strings"
 	"time"
 )
 
@@ -45,11 +47,13 @@ func dial(addr string, timeout time.Duration) (*conn, error) {
 func (c *conn) read() ([]byte, error) {
 	buf := make([]byte, 65535)
 	parts := map[int][]byte{}
-	total := -1
 	for {
 		c.c.SetReadDeadline(time.Now().Add(c.timeout))
 		n, err := c.c.Read(buf)
 		if err != nil {
+			if len(parts) > 0 {
+				return nil, fmt.Errorf("%w (got %d split packets, some never arrived)", err, len(parts))
+			}
 			return nil, err
 		}
 		p := append([]byte(nil), buf[:n]...)
@@ -60,21 +64,28 @@ func (c *conn) read() ([]byte, error) {
 		if kind == -1 {
 			return p[4:], nil
 		}
-		if kind != -2 || len(p) < 12 {
+		if kind != -2 || len(p) < 10 {
 			continue
 		}
-		// split packet (Source format): id(4) total(1) number(1) size(2) payload
-		id := binary.LittleEndian.Uint32(p[4:])
-		if id&0x80000000 != 0 {
+		// split packet: id(4) total(1) number(1) [size(2)] payload
+		if binary.LittleEndian.Uint32(p[4:])&0x80000000 != 0 {
 			return nil, errors.New("compressed responses aren't supported")
 		}
-		total = int(p[8])
-		num := int(p[9])
-		parts[num] = p[12:]
-		if len(parts) == total {
+		total, num := int(p[8]), int(p[9])
+		parts[num] = p
+		if total > 0 && len(parts) >= total {
+			// work out the header length from the first packet: its payload starts with FF FF FF FF
+			off := 12
+			if first := parts[0]; first != nil && len(first) >= 14 && bytes.Equal(first[10:14], header) {
+				off = 10
+			}
 			var all []byte
 			for i := 0; i < total; i++ {
-				all = append(all, parts[i]...)
+				pk := parts[i]
+				if pk == nil || len(pk) < off {
+					return nil, errors.New("bad split packet")
+				}
+				all = append(all, pk[off:]...)
 			}
 			if len(all) >= 4 && int32(binary.LittleEndian.Uint32(all)) == -1 {
 				return all[4:], nil
@@ -190,8 +201,30 @@ func QueryInfo(addr string, timeout time.Duration) (*Info, error) {
 	return in, nil
 }
 
+// ErrNoPlayerList means the server answered the challenge but never sent a player list —
+// typical of servers behind DDoS protection that only answer basic server-browser queries.
+var ErrNoPlayerList = errors.New("the server doesn't answer player-list requests")
+
 // QueryPlayers returns everyone currently on the server with how long they've been connected.
+// It retries a few times because a lost UDP packet in a big, split reply means starting over.
 func QueryPlayers(addr string, timeout time.Duration) ([]Player, error) {
+	var lastErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		ps, err := queryPlayersOnce(addr, timeout+time.Duration(attempt)*2*time.Second)
+		if err == nil {
+			return ps, nil
+		}
+		lastErr = err
+		time.Sleep(time.Duration(300*(attempt+1)) * time.Millisecond)
+	}
+	var ne net.Error
+	if errors.As(lastErr, &ne) && ne.Timeout() && !strings.Contains(lastErr.Error(), "split packets") {
+		return nil, ErrNoPlayerList
+	}
+	return nil, lastErr
+}
+
+func queryPlayersOnce(addr string, timeout time.Duration) ([]Player, error) {
 	c, err := dial(addr, timeout)
 	if err != nil {
 		return nil, err

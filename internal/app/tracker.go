@@ -332,9 +332,22 @@ func (t *Tracker) fetchDirect(ctx context.Context, sc *ServerConfig, name, ip st
 	if err != nil {
 		return nil, fmt.Errorf("the server didn't answer the player query at %s (%v) — check the address in Players", addr, err)
 	}
-	players, err := a2s.QueryPlayers(addr, 5*time.Second)
+	queue := 0
+	for _, kw := range strings.Split(info.Keywords, ",") {
+		if strings.HasPrefix(kw, "qp") {
+			queue, _ = strconv.Atoi(kw[2:])
+		}
+	}
+	a.mu.Lock()
+	t.queryAddr, t.serverName = addr, info.Name
+	t.bmPlayers, t.bmMax, t.bmQueue = info.Players, info.MaxPlayers, queue
+	a.mu.Unlock()
+	players, err := a2s.QueryPlayers(addr, 4*time.Second)
+	if errors.Is(err, a2s.ErrNoPlayerList) {
+		return nil, fmt.Errorf("this server answers server-browser queries but won't share its player list (%d online) — common on servers behind DDoS protection. Direct tracking can't see names here; a BattleMetrics API key in Settings is the alternative", info.Players)
+	}
 	if err != nil {
-		return nil, fmt.Errorf("the server didn't send its player list (%v)", err)
+		return nil, fmt.Errorf("the server's player list didn't come through (%v) — retrying on the next refresh", err)
 	}
 	cur := map[string]seenPlayer{}
 	for _, p := range players {
@@ -351,17 +364,6 @@ func (t *Tracker) fetchDirect(ctx context.Context, sc *ServerConfig, name, ip st
 		}
 		cur[k] = seenPlayer{Name: n, Dur: p.Duration}
 	}
-	queue := 0
-	for _, kw := range strings.Split(info.Keywords, ",") {
-		if strings.HasPrefix(kw, "qp") {
-			queue, _ = strconv.Atoi(kw[2:])
-		}
-	}
-	a.mu.Lock()
-	t.queryAddr = addr
-	t.serverName = info.Name
-	t.bmPlayers, t.bmMax, t.bmQueue = info.Players, info.MaxPlayers, queue
-	a.mu.Unlock()
 	if len(players) == 0 && info.Players > 0 {
 		return nil, fmt.Errorf("this server hides its player list (%d players online), so direct tracking can't see names here — a BattleMetrics API key in Settings is the alternative", info.Players)
 	}
