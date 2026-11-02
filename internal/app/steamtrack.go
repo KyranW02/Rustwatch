@@ -276,9 +276,15 @@ func (t *Tracker) mergeSteamLocked(sc *ServerConfig, cur map[string]seenPlayer, 
 			if n == "" {
 				continue
 			}
-			if k := directKey(n); cur[k].Name != "" {
-				sp.Dur = cur[k].Dur
-				delete(cur, k)
+			found := false
+			for k, p := range cur { // name key (direct) or BattleMetrics id
+				if !strings.HasPrefix(k, "s:") && strings.EqualFold(p.Name, n) {
+					sp.Dur, found = p.Dur, true
+					delete(cur, k)
+					break
+				}
+			}
+			if found {
 				break
 			}
 		}
