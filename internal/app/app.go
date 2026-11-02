@@ -699,6 +699,8 @@ type TimeView struct {
 	UntilLabel string  `json:"untilLabel"`
 	Until      string  `json:"until"`
 	Hours      float64 `json:"hours"`
+	Sunrise    float64 `json:"sunrise"`
+	Sunset     float64 `json:"sunset"`
 }
 
 func (a *App) timeViewLocked() *TimeView {
@@ -716,7 +718,7 @@ func (a *App) timeViewLocked() *TimeView {
 	}
 	gt = math.Mod(gt, 24)
 	cur := &rustplus.Time{Time: float32(gt), Sunrise: t.Sunrise, Sunset: t.Sunset}
-	v := &TimeView{Hours: gt, IsDay: isDay(cur)}
+	v := &TimeView{Hours: gt, IsDay: isDay(cur), Sunrise: float64(t.Sunrise), Sunset: float64(t.Sunset)}
 	h := int(gt)
 	m := int((gt - float64(h)) * 60)
 	v.Clock = fmt.Sprintf("%02d:%02d", h, m)

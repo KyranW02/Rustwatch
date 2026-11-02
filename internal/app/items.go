@@ -285,6 +285,7 @@ type CraftView struct {
 type QtyView struct {
 	Name     string  `json:"name"`
 	ID       int32   `json:"id"`
+	Short    string  `json:"short"`
 	Quantity float64 `json:"quantity"`
 	Chance   float64 `json:"chance,omitempty"`
 }
@@ -303,16 +304,16 @@ func GetItemDetail(id int32) (ItemDetail, bool) {
 			cv.Workbench = ItemName(c.Workbench)
 		}
 		for _, ing := range c.Ingredients {
-			cv.Ingredients = append(cv.Ingredients, QtyView{Name: ItemName(int32(ing[0])), ID: int32(ing[0]), Quantity: float64(ing[1])})
+			cv.Ingredients = append(cv.Ingredients, QtyView{Name: ItemName(int32(ing[0])), ID: int32(ing[0]), Short: items.byID[int32(ing[0])].Shortname, Quantity: float64(ing[1])})
 		}
 		d.Craft = cv
 	}
 	if r, ok := items.recycle[id]; ok {
 		for _, y := range r.SafeZone {
-			d.Recycle = append(d.Recycle, QtyView{Name: ItemName(y.ID), ID: y.ID, Quantity: y.Quantity, Chance: y.Probability})
+			d.Recycle = append(d.Recycle, QtyView{Name: ItemName(y.ID), ID: y.ID, Short: items.byID[y.ID].Shortname, Quantity: y.Quantity, Chance: y.Probability})
 		}
 		for _, y := range r.Monument {
-			d.GRecycle = append(d.GRecycle, QtyView{Name: ItemName(y.ID), ID: y.ID, Quantity: y.Quantity, Chance: y.Probability})
+			d.GRecycle = append(d.GRecycle, QtyView{Name: ItemName(y.ID), ID: y.ID, Short: items.byID[y.ID].Shortname, Quantity: y.Quantity, Chance: y.Probability})
 		}
 	}
 	return d, true

@@ -74,7 +74,7 @@ func resolveSteamID(ctx context.Context, key, in string) (string, error) {
 		return "", errors.New("that isn't a Steam profile link — copy it from the player's Steam profile (steamcommunity.com/id/… or /profiles/…)")
 	}
 	if key == "" {
-		return "", errors.New("add a free Steam Web API key in Settings → Kills first")
+		return "", errors.New("add a free Steam Web API key in Settings → Steam first")
 	}
 	var out struct {
 		Response struct {

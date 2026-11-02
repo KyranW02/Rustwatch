@@ -3,7 +3,15 @@ const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const icon = (short, name = "") => short ? `<img src="https://rustlabs.com/img/items180/${encodeURIComponent(short)}.png" alt="${esc(name)}" loading="lazy" onerror="iconFail(this)">` : "";
-window.iconFail = (img) => { if (img.alt && img.closest(".inv")) { const e = document.createElement("em"); e.textContent = img.alt; img.replaceWith(e); } else img.remove(); };
+window.iconFail = (img) => {
+  if (img.alt && img.closest(".inv")) { const e = document.createElement("em"); e.textContent = img.alt; img.replaceWith(e); }
+  else if (img.alt && img.closest(".slot")) { const e = document.createElement("span"); e.className = "ab"; e.textContent = img.alt.replace(/[^A-Za-z0-9 ]/g, "").split(" ").map((w) => w[0]).join("").slice(0, 3) || img.alt.slice(0, 3); img.replaceWith(e); }
+  else img.remove();
+};
+const svg = (id, cls = "") => `<svg class="${cls}" aria-hidden="true"><use href="#i-${id}"/></svg>`;
+const short = (n) => n >= 1000 ? (n / 1000).toFixed(n >= 10000 ? 0 : 1).replace(/\.0$/, "") + "k" : String(n);
+const chip = (val, label, cls = "") => `<div class="chip ${cls}"><b>${val}</b><span>${esc(label)}</span></div>`;
+const slotOf = (sh, name, q) => `<div class="slot" title="${esc(name || "")}">${sh ? icon(sh, name) : ""}${!sh && name ? `<span class="ab">${esc(name.slice(0, 3))}</span>` : ""}${q ? `<span class="q">${esc(q)}</span>` : ""}</div>`;
 const clock = (unix) => new Date(unix * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 const ago = (unix) => {
   const s = Math.max(0, Date.now() / 1000 - unix);
@@ -91,11 +99,19 @@ function connectStream() {
 
 /* ---------- tabs ---------- */
 $$(".rail button").forEach((b) => b.addEventListener("click", () => setTab(b.dataset.tab)));
+// number keys switch pages, like the hotbar in game
+document.addEventListener("keydown", (e) => {
+  if (e.ctrlKey || e.altKey || e.metaKey || /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName) || document.activeElement?.isContentEditable) return;
+  const b = $$(".rail button").find((x) => $("kbd", x)?.textContent === e.key);
+  if (b) { e.preventDefault(); setTab(b.dataset.tab); }
+});
 function setTab(t) {
   tab = t;
   $$(".rail button").forEach((b) => b.classList.toggle("on", b.dataset.tab === t));
   $$("section[data-panel]").forEach((s) => s.classList.toggle("on", s.dataset.panel === t));
   if (t === "alerts") { unread = 0; $("#alertCount").textContent = ""; }
+  if (t === "chat") chatSeen = (S && S.chat || []).length;
+  $("#main section.on")?.scrollTo(0, 0);
   render();
 }
 
@@ -103,6 +119,7 @@ function setTab(t) {
 function render() {
   if (!S) return;
   renderStrip();
+  renderNav();
   const vids = [];
   (S.vending || []).forEach((v) => (v.orders || []).forEach((o) => vids.push(o.itemId, o.currencyId)));
   ensureNames(vids).then((ch) => ch && (maps.overview.draw(), maps.full.draw()));
@@ -114,28 +131,58 @@ function render() {
 function renderStrip() {
   const st = S.status, i = S.info, t = S.time;
   const lampText = { connected: "Connected", connecting: "Connecting…", reconnecting: "Reconnecting…", disconnected: "Not connected" }[st] || st;
-  let h = "";
-  if (S.active) {
-    h += `<div class="srv" title="${esc(S.active.name)}">${esc((i && i.name) || S.active.name || S.active.ip)}</div>`;
-    if (i) {
-      h += `<div class="stat"><b>${i.players}/${i.maxPlayers}</b><span>${i.queuedPlayers ? i.queuedPlayers + " in queue" : "players"}</span></div>`;
-    }
-    if (t) h += `<div class="stat"><b>${t.clock} ${t.isDay ? "☀" : "☾"}</b><span>${t.until} ${t.untilLabel}</span></div>`;
-    if (S.wipeAgo) h += `<div class="stat"><b>${S.wipeAgo}</b><span>since wipe</span></div>`;
-    const on = (S.team || []).filter((m) => m.isOnline).length;
-    if (S.team) h += `<div class="stat"><b>${on}/${S.team.length}</b><span>team online</span></div>`;
-  } else {
-    h += `<div class="srv muted">No server selected</div>`;
-  }
-  if (S.demo) h += `<span class="demo">Demo mode</span>`;
+  const vital = (cls, ic, val, label, frac, title = "") => `<div class="vital ${cls}" title="${esc(title)}">${svg(ic)}<div class="bar"><i style="width:${Math.max(0, Math.min(1, frac)) * 100}%"></i><b>${val}</b><span>${esc(label)}</span></div></div>`;
+  let h = `<div class="srvbox">`;
+  h += S.active ? `<div class="srv" title="${esc(S.active.name)}">${esc((i && i.name) || S.active.name || S.active.ip)}</div>` : `<div class="srv muted">No server selected</div>`;
+  h += `<span class="lamp ${st}" title="${esc(S.statusError || "")}"><i></i>${esc(lampText)}${S.statusError && st !== "connected" ? ` <span class="err">${esc(S.statusError)}</span>` : ""}${S.demo ? ` <span class="demo">Demo</span>` : ""}</span></div>`;
   if (S.update && S.update.available) h += `<button class="small updbtn" onclick="setTab('settings');setTimeout(()=>$('#updBox')?.scrollIntoView({block:'center'}),50)">Update to ${esc(S.update.latest)}</button>`;
-  h += `<span class="lamp ${st}" title="${esc(S.statusError || "")}"><i></i>${esc(lampText)}${S.statusError && st !== "connected" ? " — " + esc(S.statusError) : ""}</span>`;
+  h += `<div class="vitals">`;
+  if (S.active) {
+    if (i) h += vital("pop", "pop", `${i.players}/${i.maxPlayers}`, i.queuedPlayers ? `${i.queuedPlayers} queued` : "players", i.players / (i.maxPlayers || 1), "Players online / server slots");
+    if (t) {
+      // fraction of the day or night that has passed
+      const rise = t.sunrise || 7.5, set = t.sunset || 19.5, dayLen = set - rise;
+      const frac = t.isDay ? (t.hours - rise) / dayLen : ((t.hours - set + 24) % 24) / (24 - dayLen);
+      h += vital(t.isDay ? "day" : "night", t.isDay ? "sun" : "moon", t.clock, `${t.untilLabel.replace(/^until /, "")} in ${t.until.replace(/ \d+s$/, "")}`, frac, `${t.until} ${t.untilLabel}`);
+    }
+    if (S.wipeAgo) h += vital("wipe", "wipe", S.wipeAgo, "since wipe", Math.min(1, wipeDays() / 7), "Time since the server wiped");
+    if (S.team) { const on = S.team.filter((m) => m.isOnline).length; h += vital("team", "team", `${on}/${S.team.length}`, "team online", on / (S.team.length || 1)); }
+  }
+  h += `</div>`;
   $("#strip").innerHTML = h;
 }
+function wipeDays() { const w = S.info && S.info.wipeTime; return w ? (Date.now() / 1000 - w) / 86400 : 0; }
 
-const EVENT_ROWS = [["cargo", "Cargo"], ["heli", "Heli"], ["chinook", "Chinook"], ["smallOil", "Small rig"], ["largeOil", "Large rig"], ["oilHeard", "Oil rigs (heard)"], ["bradley", "Bradley"], ["vendor", "Vendor"], ["excavator", "Excavator"], ["deepsea", "Deep Sea"]];
+/* side-menu badges: a glance at each page without opening it */
+let chatSeen = -1;
+function renderNav() {
+  const set = (k, text, cls = "") => { const el = $(`[data-badge="${k}"]`); if (el) { el.textContent = text; el.className = cls; } };
+  const team = S.team || [];
+  const on = team.filter((m) => m.isOnline).length;
+  set("team", team.length ? `${on}/${team.length}` : "", on ? "ok" : "");
+  set("overview", S.events && S.events.active && S.events.active.length ? `${S.events.active.length} live` : "", "warn");
+  const T = S.tracker || {};
+  const trkOn = (T.tracked || []).filter((p) => p.online).length;
+  set("players", (T.tracked || []).length ? `${trkOn} on` : "", trkOn ? "warn" : "");
+  const ra = S.raid && S.raid.active;
+  set("sounds", ra ? "Raid" : "", "bad");
+  set("map", ra && ra.Located ? "Raid" : "", "bad");
+  set("shops", (S.vending || []).length ? String(S.vending.length) : "");
+  const devs = S.devices || [];
+  const trig = devs.filter((d) => d.type === 2 && d.value).length;
+  const low = devs.filter((d) => d.type === 3 && d.hasProtection && d.upkeepSeconds && d.upkeepSeconds < S.settings.upkeepAlertHours * 3600).length;
+  set("devices", trig ? "Alarm" : low ? "Upkeep" : devs.length ? String(devs.length) : "", trig || low ? "bad" : "");
+  const c = (S.chat || []).length;
+  if (chatSeen < 0 || tab === "chat") chatSeen = c;
+  set("chat", c > chatSeen ? String(c - chatSeen) : "", "warn");
+  set("servers", S.active ? "" : "Pair", "warn");
+  set("settings", S.update && S.update.available ? "Update" : "", "warn");
+}
+
+const EVENT_ROWS = [["cargo", "Cargo ship", "ship"], ["heli", "Patrol heli", "heli"], ["chinook", "Chinook", "chinook"], ["smallOil", "Small oil rig", "oil"], ["largeOil", "Large oil rig", "oil"], ["oilHeard", "Oil rigs (heard)", "oil"], ["bradley", "Bradley", "tank"], ["vendor", "Travelling vendor", "van"], ["excavator", "Excavator", "dig"], ["deepsea", "Deep Sea", "deep"]];
 function renderOverview() {
   maps.overview.draw();
+  renderOvRaid();
   if (!S.active) {
     $("#ovEvents").innerHTML = `<div class="empty-note">Pair a server to start. Open <a href="#" onclick="setTab('servers');return false">Servers</a>.</div>`;
     $("#ovTeam").innerHTML = ""; $("#ovAlerts").innerHTML = ""; $("#ovTimers").innerHTML = "";
@@ -144,15 +191,29 @@ function renderOverview() {
   const ev = S.events;
   const fc = Object.fromEntries((S.forecasts || []).map((f) => [f.kind, f]));
   const nextLine = (k) => {
-    const f = fc[k === "chinook" ? "chinook" : k];
+    const f = fc[k];
     if (!f) return "";
-    const cls = { window: "due", overdue: "late", active: "", upcoming: "", unknown: "muted" }[f.state] || "";
+    const cls = { window: "due", overdue: "late", active: "", upcoming: "", unknown: "" }[f.state] || "";
     return `<div class="next ${cls}" title="${esc(f.source)}">Next: ${esc(f.short)}${f.learned ? ' <span class="learned">learned</span>' : ""}</div>`;
   };
-  $("#ovEvents").innerHTML = (markersCut() ? `<div class="muted" style="font-size:13px;margin-bottom:8px">Live event tracking isn't possible on this server: ${MARKERS_CUT_TEXT} RustWatch can hear events instead: teach it the sounds on the <a href="#" onclick="setTab('sounds');return false">Sounds</a> page. The "Next" windows are estimates timed from the wipe, restarts and anything heard.</div>` : "") + (ev ? EVENT_ROWS.map(([k, label]) => `<div class="ev ${ev.active?.includes(k) || fc[k]?.state === "window" ? "live" : ""}"><span class="k">${label}</span><span>${esc(ev[k])}${["cargo", "heli", "chinook", "vendor"].includes(k) ? nextLine(k) : ""}</span></div>`).join("") : `<div class="empty-note">Waiting for map data…</div>`);
+  const cut = markersCut() ? `<div class="cutnote">Rust's August 2026 update stopped servers sending these to Rust+, so RustWatch listens for them in the game instead (<a href="#" onclick="setTab('sounds');return false">Sounds</a>). "Next" times are estimates from the wipe, restarts and anything heard.</div>` : "";
+  $("#ovEvents").innerHTML = cut + (ev ? EVENT_ROWS.map(([k, label, ic]) => {
+    const live = ev.active?.includes(k), due = fc[k]?.state === "window";
+    const st = live ? "Live" : due ? "Due" : "";
+    return `<div class="ev ${live || due ? "live" : ""}"><span class="evi">${svg(ic)}</span><div><div class="k">${label}<span class="st">${st}</span></div><div class="t">${esc(ev[k])}</div>${["cargo", "heli", "chinook", "vendor"].includes(k) ? nextLine(k) : ""}</div></div>`;
+  }).join("") : `<div class="empty-note">Waiting for map data…</div>`);
   $("#ovTeam").innerHTML = (S.team || []).map(mateRow).join("") || `<div class="empty-note">You're not in a team.</div>`;
-  $("#ovTimers").innerHTML = (S.timers || []).map((t) => `<div class="mate"><span class="dot afk"></span><span>${esc(t.message)} <small>in ${t.left}</small></span><button class="ghost small" onclick="act('/api/timers/cancel',{id:${t.id}})">Cancel</button></div>`).join("") || `<div class="muted" style="font-size:14px">No timers running. Team-chat command: !timer 10m message</div>`;
-  $("#ovAlerts").innerHTML = (("Notification" in window && Notification.permission === "default") ? `<div class="al">${notifyStatus()}</div>` : "") + ((S.log || []).slice(-8).reverse().map(alertRow).join("") || `<div class="empty-note">Nothing yet.</div>`);
+  $("#ovTimers").innerHTML = (S.timers || []).map((t) => `<div class="mate"><span class="bar4 afk"></span><span>${esc(t.message)} <small>in ${t.left}</small></span><button class="ghost small" onclick="act('/api/timers/cancel',{id:${t.id}})">Cancel</button></div>`).join("") || `<div class="muted small" style="margin-bottom:10px">No timers running. In team chat: <code>!timer 10m bradley up</code></div>`;
+  $("#ovAlerts").innerHTML = (("Notification" in window && Notification.permission === "default") ? `<div class="al"><span></span><span>${notifyStatus()}</span></div>` : "") + ((S.log || []).slice(-8).reverse().map(alertRow).join("") || `<div class="empty-note">Nothing yet.</div>`);
+}
+function raidWhere(ra) {
+  if (!ra.Located || !S.map) return "Direction unknown: connect Rust+ so RustWatch knows which way you're facing.";
+  return `Around <b>${gridOf(ra.X, ra.Y)}</b>${ra.Ambiguous ? ` or <b>${gridOf(ra.AltX, ra.AltY)}</b> (turn between blasts to settle it)` : ""}`;
+}
+function renderOvRaid() {
+  const ra = S.raid && S.raid.active;
+  $("#ovRaidBox").hidden = !ra;
+  if (ra) $("#ovRaid").innerHTML = `<div class="raidnow"><b>${ra.Count} explosions</b><div>${raidWhere(ra)}</div><div class="muted small">Started ${clock(Date.parse(ra.Start) / 1000)}, last blast ${ago(Date.parse(ra.LastBlast) / 1000)}</div></div>`;
 }
 // Rust's 6 Aug 2026 update stopped sending shop, cargo, heli and vendor markers to Rust+.
 // Modded servers may still send them, so only say so when the server sends none.
@@ -161,16 +222,18 @@ const MARKERS_CUT_TEXT = "Rust's 6 August 2026 update stopped servers sending sh
 
 function mateRow(m) {
   const cls = !m.isOnline ? "" : !m.isAlive ? "dead" : m.afk ? "afk" : "on";
-  const sub = !m.isOnline ? (m.offlineFor ? `offline ${m.offlineFor}` : "offline") : !m.isAlive ? `dead ${m.deadFor || ""}` : m.afk ? `AFK ${m.afkFor}` : m.grid;
-  return `<div class="mate"><span class="dot ${cls}"></span><span>${esc(m.name)}${m.leader ? ' <small title="Team leader">★</small>' : ""}</span><small>${esc(sub)}</small></div>`;
+  const sub = !m.isOnline ? (m.offlineFor ? `Offline ${m.offlineFor}` : "Offline") : !m.isAlive ? `Dead ${m.deadFor || ""}` : m.afk ? `AFK ${m.afkFor} · ${m.grid}` : `${m.grid}${m.aliveFor ? " · alive " + m.aliveFor : ""}`;
+  return `<div class="mate"><span class="bar4 ${cls}"></span><span><b>${esc(m.name)}</b>${m.leader ? ' <small title="Team leader">★ leader</small>' : ""}</span><small>${esc(sub)}</small></div>`;
 }
-function alertRow(e) {
-  return `<div class="al"><time>${clock(e.time)}</time><b>${esc(e.title)}</b><div class="muted">${esc(e.text)}</div></div>`;
+function alertRow(e, full) {
+  return `<div class="al k-${esc(e.kind)}"><time>${full ? new Date(e.time * 1000).toLocaleString([], { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : clock(e.time)}</time><b>${esc(e.title)}</b><div class="muted">${esc(e.text)}</div></div>`;
 }
 
 function renderTeam() {
   const team = S.team || [];
-  if (!team.length) { $("#teamTable").innerHTML = `<div class="empty-note">${S.active ? "No team info yet — you need to be in a team in-game." : "Connect to a server first."}</div>`; return; }
+  const n = (f) => team.filter(f).length;
+  $("#teamSummary").innerHTML = team.length ? chip(n((m) => m.isOnline && m.isAlive && !m.afk), "Online", "ok") + chip(n((m) => m.isOnline && m.afk), "AFK", "warn") + chip(n((m) => m.isOnline && !m.isAlive), "Dead", "bad") + chip(n((m) => !m.isOnline), "Offline") + chip(team.reduce((a, m) => a + (m.deaths || 0), 0), "Team deaths") : "";
+  if (!team.length) { $("#teamTable").innerHTML = `<div class="empty-note pad">${S.active ? "No team info yet. You need to be in a team in game." : "Connect to a server first."}</div>`; $("#teamNote").innerHTML = ""; return; }
   const iAmLeader = S.leaderId === S.myId;
   const hasKey = !!S.settings.steamApiKey;
   const statCells = (m) => {
@@ -182,10 +245,10 @@ function renderTeam() {
     const cls = !m.isOnline ? "" : !m.isAlive ? "dead" : m.afk ? "afk" : "on";
     const status = !m.isOnline ? `<span class="pill">Offline${m.offlineFor ? " " + m.offlineFor : ""}</span>` : !m.isAlive ? `<span class="pill bad">Dead ${m.deadFor || ""}</span>` : m.afk ? `<span class="pill warn">AFK ${m.afkFor}</span>` : `<span class="pill ok">Online</span>`;
     const promote = iAmLeader && !m.leader ? `<button class="ghost small" onclick="promote('${m.steamId}','${esc(m.name)}')">Make leader</button>` : m.leader ? `<span class="muted">Leader</span>` : "";
-    return `<tr><td><span class="dot ${cls}"></span></td><td><b>${esc(m.name)}</b><div class="muted" style="font-size:12px"><a href="https://steamcommunity.com/profiles/${m.steamId}" target="_blank" rel="noopener" style="color:inherit">${m.steamId}</a></div></td><td>${status}</td><td>${esc(m.grid)}</td><td class="num">${m.onlineFor || "–"}</td><td class="num">${m.isAlive ? m.aliveFor || "–" : "–"}</td><td class="num">${m.deaths}</td>${statCells(m)}<td>${promote}</td></tr>`;
-  }).join("")}</tbody></table>
-  <p class="muted">AFK means a teammate hasn't moved for ${S.settings.afkMinutes} minutes. Online time counts from when RustWatch first saw them.
-  ${hasKey ? "Kills come from Steam's Rust stats, which count every server a player plays on and update when Steam syncs (usually within a few minutes). Wipe K / D counts from the first reading after this wipe." : `Rust+ doesn't share kills. To show kills, add a free Steam Web API key in <a href="#" onclick="setTab('settings');return false">Settings</a>.`}</p>`;
+    return `<tr><td style="width:6px;padding-right:0"><span class="dot ${cls}"></span></td><td><b style="font-size:16px">${esc(m.name)}</b><div class="muted" style="font-size:12px"><a href="https://steamcommunity.com/profiles/${m.steamId}" target="_blank" rel="noopener" style="color:inherit">${m.steamId}</a></div></td><td>${status}</td><td><span class="wb">${esc(m.grid)}</span></td><td class="num">${m.onlineFor || "–"}</td><td class="num">${m.isAlive ? m.aliveFor || "–" : "–"}</td><td class="num">${m.deaths}</td>${statCells(m)}<td>${promote}</td></tr>`;
+  }).join("")}</tbody></table>`;
+  $("#teamNote").innerHTML = `AFK means a teammate hasn't moved for ${S.settings.afkMinutes} minutes. Online time counts from when RustWatch first saw them.
+  ${hasKey ? "Kills come from Steam's Rust stats, which count every server a player plays on and update when Steam syncs (usually within a few minutes). Wipe K / D counts from the first reading after this wipe." : `Rust+ doesn't share kills. To show kills, add a free Steam Web API key in <a href="#" onclick="setTab('settings');return false">Settings</a>.`}`;
 }
 window.promote = (id, name) => { if (confirm(`Make ${name} the team leader?`)) act("/api/team/promote", { steamId: id }, `${name} is now leader`); };
 
@@ -207,7 +270,9 @@ function renderShops() {
   const ids = [];
   vms.forEach((v) => (v.orders || []).forEach((o) => ids.push(o.itemId, o.currencyId)));
   ensureNames(ids).then((changed) => changed && renderShops());
-  $("#vendCount").textContent = `(${vms.length})`;
+  $("#vendCount").textContent = vms.length ? `${vms.length} on the map` : "";
+  const orders = vms.reduce((a, v) => a + (v.orders || []).length, 0), stocked = vms.filter((v) => !v.outOfStock).length;
+  $("#shopSummary").innerHTML = S.active ? chip(vms.length, "Shops", "info") + chip(stocked, "In stock", "ok") + chip(orders, "Listings") + chip((S.watches || []).length, "Item alerts", "warn") : "";
   const mi = S.markerInfo || {};
   const diagLine = mi.at || mi.error
     ? `Rust+ map data: ${mi.total || 0} markers, ${mi.vending || 0} shops${mi.at ? " · updated " + ago(mi.at) : ""}${mi.error ? ` · <span style="color:#e8a097">last error: ${esc(mi.error)}</span>` : ""}`
@@ -217,14 +282,14 @@ function renderShops() {
   const tracked = new Set(S.trackedVMs || []);
   const list = vms.filter((v) => !f || v.name.toLowerCase().includes(f) || (v.orders || []).some((o) => itemName(o.itemId).toLowerCase().includes(f)));
   if (S.active && !vms.length && (mi.at || mi.error)) {
-    $("#vendList").innerHTML = mi.error && !mi.at ? `<div class="emptybox"><b>RustWatch couldn't get the map data.</b>
+    $("#vendList").innerHTML = mi.error && !mi.at ? `<div class="emptybox err"><b>RustWatch couldn't get the map data.</b>
       <p>The last request failed: ${esc(mi.error)}. Save a diagnostics file and send it over so the cause can be found.</p>
       <button class="small" onclick="saveDiag()">Save diagnostics</button></div>` : `<div class="emptybox"><b>Rust no longer sends shops to Rust+.</b>
       <p>${MARKERS_CUT_TEXT} So shop search, item alerts and shop tracking can't see anything on servers running the current version of Rust, and the Rust+ phone app doesn't show shops either. A modded server that still sends them will show up here automatically.</p></div>`;
     return;
   }
   $("#vendList").innerHTML = list.map((v) => `<div class="shop"><header><span class="g">${esc(v.grid.split(" ")[0])}</span><b>${esc(v.name)}</b>${v.outOfStock ? '<span class="pill">Out of stock</span>' : ""}<button class="${tracked.has(v.key) ? "" : "ghost"} small" onclick="trackVM('${v.key}',${!tracked.has(v.key)})">${tracked.has(v.key) ? "Tracking changes" : "Track changes"}</button></header>${(v.orders || []).map(orderLine).join("")}</div>`).join("") || `<div class="empty-note">${S.active ? "No vending machines on the map yet." : "Connect to a server first."}</div>`;
-  $("#watchList").innerHTML = (S.watches || []).map((w) => `<div class="hit"><span>${icon(w.short)}</span><span><b>${esc(w.name)}</b> ${w.maxPrice ? `<span class="muted">at most ${w.maxPrice}</span>` : '<span class="muted">any price</span>'} <button class="ghost small" onclick="act('/api/vending/watch',{itemId:${w.itemId},remove:true})">Stop watching</button></span></div>`).join("") || `<div class="empty-note">No item alerts yet.</div>`;
+  $("#watchList").innerHTML = (S.watches || []).map((w) => `<div class="hit">${slotOf(w.short, w.name)}<span><b>${esc(w.name)}</b> ${w.maxPrice ? `<span class="muted">at most ${w.maxPrice}</span>` : '<span class="muted">any price</span>'} <button class="ghost small" onclick="act('/api/vending/watch',{itemId:${w.itemId},remove:true})">Stop watching</button></span></div>`).join("") || `<div class="empty-note">No item alerts yet.</div>`;
 }
 window.saveDiag = () => api("/api/diagnostics", {}).then((r) => toast("Diagnostics saved", r.path)).catch((e) => toast("Couldn't save diagnostics", e.message, "alarm"));
 window.trackVM = (key, on) => act("/api/vending/track", { key, track: on });
@@ -258,29 +323,41 @@ $("#watchForm").q.addEventListener("input", async (e) => {
 /* ---------- devices ---------- */
 function renderDevices() {
   const devs = S.devices || [];
+  const sw = devs.filter((d) => d.type === 1), al = devs.filter((d) => d.type === 2), mon = devs.filter((d) => d.type === 3);
+  const ups = mon.filter((d) => d.hasProtection && d.upkeepSeconds).map((d) => d.upkeepSeconds);
+  $("#devSummary").innerHTML = devs.length ? chip(`${sw.filter((d) => d.value).length}/${sw.length}`, "Switches on", "ok") + chip(al.filter((d) => d.value).length, "Alarms going off", al.some((d) => d.value) ? "bad" : "") + chip(mon.length, "Storage monitors", "info") + (ups.length ? chip(fmtSecs(Math.min(...ups)), "Lowest upkeep", Math.min(...ups) < S.settings.upkeepAlertHours * 3600 ? "bad" : "ok") : "") : "";
   if (!S.active) { $("#devices").innerHTML = `<div class="empty-note">Connect to a server first.</div>`; return; }
-  if (!devs.length) { $("#devices").innerHTML = `<div class="empty-note">No devices paired yet.</div>`; return; }
+  if (!devs.length) { $("#devices").innerHTML = `<div class="emptybox"><b>No devices paired yet.</b><p>In game, look at a smart switch, smart alarm or storage monitor, hold E and choose Pair.</p></div>`; return; }
   const focus = document.activeElement && document.activeElement.dataset.dev;
   if (focus) return; // don't clobber the field being edited
   $("#devices").innerHTML = `<div class="devgrid">${devs.map(devCard).join("")}</div>`;
 }
+function fmtSecs(s) { const d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600), m = Math.floor((s % 3600) / 60); return d ? `${d}d ${h}h` : h ? `${h}h ${m}m` : `${m}m`; }
 function devCard(d) {
   const kind = { 1: "Smart switch", 2: "Smart alarm", 3: "Storage monitor" }[d.type] || "Device";
-  const err = d.error ? `<div class="pill bad" title="${esc(d.error)}">${/not_found/.test(d.error) ? "Not found — re-pair it" : "Error"}</div>` : "";
-  let body = "";
+  const ic = { 1: "switch", 2: "alarm", 3: "box" }[d.type] || "devices";
+  const err = d.error ? `<span class="pill bad" title="${esc(d.error)}">${/not_found/.test(d.error) ? "Not found, re-pair it" : "Error"}</span>` : "";
+  let body = "", cls = "";
   if (d.type === 1) {
-    body = `<div class="row"><button class="switch ${d.value ? "on" : ""}" aria-label="Toggle ${esc(d.name)}" aria-pressed="${!!d.value}" onclick="act('/api/devices/toggle',{entityId:${d.entityId},value:${!d.value}})"></button><span>${d.value == null ? "Unknown" : d.value ? "On" : "Off"}</span></div>
-      <div class="row"><span class="muted">${esc(S.settings.prefix)}</span><input data-dev="cmd" value="${esc(d.command || "")}" placeholder="chat command" id="cmd-${d.entityId}"><button class="ghost small" onclick="saveDev(${d.entityId})">Save</button></div>`;
+    cls = d.value ? "on" : "";
+    body = `<div class="row"><div class="power" role="group" aria-label="${esc(d.name)} power"><button class="${d.value ? "sel on" : ""}" aria-pressed="${!!d.value}" onclick="act('/api/devices/toggle',{entityId:${d.entityId},value:true})">On</button><button class="${d.value === false ? "sel off" : ""}" aria-pressed="${d.value === false}" onclick="act('/api/devices/toggle',{entityId:${d.entityId},value:false})">Off</button></div><span class="power-state">${d.value == null ? "State unknown" : d.value ? "Powered" : "Not powered"}</span></div>
+      <div class="row"><span class="muted" title="Team-chat command">${esc(S.settings.prefix)}</span><input data-dev="cmd" value="${esc(d.command || "")}" placeholder="chat command, e.g. turrets" id="cmd-${d.entityId}" aria-label="Chat command"><button class="ghost small" onclick="saveDev(${d.entityId})">Save</button></div>`;
   } else if (d.type === 2) {
-    body = `<div class="row"><span class="pill ${d.value ? "bad" : ""}">${d.value ? "Triggered" : "Quiet"}</span></div>`;
+    cls = d.value ? "trig" : "";
+    body = `<div class="alarmstate ${d.value ? "trig" : ""}">${d.value ? "Triggered" : "Quiet"}</div><div class="muted small">Alarm pushes arrive even when the switch state can't be read.</div>`;
   } else if (d.type === 3) {
     const low = d.upkeepSeconds && d.upkeepSeconds < S.settings.upkeepAlertHours * 3600;
-    body = (d.hasProtection ? `<div class="upkeep ${low ? "low" : ""}">${d.upkeepLeft ? "Upkeep: " + d.upkeepLeft : "No upkeep"}</div>` : "") +
-      `<div class="inv">${d.items.map((it) => `<div title="${esc(it.name)}${it.blueprint ? " blueprint" : ""}">${icon(it.short, it.name) || `<em>${esc(it.name)}</em>`}<span>${it.quantity >= 1000 ? (it.quantity / 1000).toFixed(it.quantity >= 10000 ? 0 : 1) + "k" : it.quantity}</span></div>`).join("")}</div>
-      <div class="meta" style="margin-top:6px">${d.items.length}/${d.capacity || "?"} slots</div>`;
+    cls = low ? "low" : "";
+    const cap = d.capacity || 24, slots = [];
+    for (let i = 0; i < cap; i++) {
+      const it = d.items[i];
+      slots.push(it ? `<div title="${esc(it.name)}${it.blueprint ? " blueprint" : ""}: ${it.quantity.toLocaleString()}">${icon(it.short, it.name) || `<em>${esc(it.name)}</em>`}<span>${it.quantity > 1 ? "x" + short(it.quantity) : ""}</span></div>` : `<div class="empty"></div>`);
+    }
+    body = (d.hasProtection ? `<div class="upkeep ${low ? "low" : ""}"><b>${d.upkeepLeft || "No upkeep"}</b><span>${d.upkeepLeft ? "until decay" : ""}</span></div><div class="upbar"><i style="width:${Math.min(100, ((d.upkeepSeconds || 0) / (3 * 86400)) * 100)}%"></i></div>` : "") +
+      `<div class="inv">${slots.join("")}</div><div class="meta" style="margin-top:6px">${d.items.length} of ${cap} slots used</div>`;
   }
-  return `<div class="dev ${d.type === 2 ? "alarm" : ""} ${d.type === 2 && d.value ? "trig" : ""}"><header><div><h3>${esc(d.name)}</h3><div class="meta">${kind} · #${d.entityId}${d.updated ? " · updated " + ago(d.updated) : ""}</div></div>${err}</header>${body}
-    <div class="row"><input data-dev="name" id="name-${d.entityId}" value="${esc(d.name)}" aria-label="Name"><button class="ghost small" onclick="saveDev(${d.entityId})">Rename</button><button class="danger small" onclick="if(confirm('Remove ${esc(d.name)}?'))act('/api/devices/remove',{entityId:${d.entityId}})">Remove</button></div></div>`;
+  return `<div class="dev ${cls}"><header><span class="devi">${svg(ic)}</span><div><h3>${esc(d.name)}</h3><div class="meta">${kind} · #${d.entityId}${d.updated ? " · updated " + ago(d.updated) : ""}</div></div>${err}</header><div class="body">${body}</div>
+    <div class="foot row"><input data-dev="name" id="name-${d.entityId}" value="${esc(d.name)}" aria-label="Name"><button class="ghost small" onclick="saveDev(${d.entityId})">Rename</button><button class="danger small" onclick="if(confirm('Remove ${esc(d.name)}?'))act('/api/devices/remove',{entityId:${d.entityId}})">Remove</button></div></div>`;
 }
 window.saveDev = (id) => {
   const d = S.devices.find((x) => x.entityId === id);
@@ -296,6 +373,7 @@ $("#devForm").addEventListener("submit", (e) => {
 });
 
 /* ---------- players ---------- */
+let namesOpen = null; // remembers whether the hidden-names explanation is open
 function renderPlayers() {
   const T = S.tracker;
   if (!S.active) { $("#bmStatus").innerHTML = `<div class="empty-note">Connect to a server first.</div>`; return; }
@@ -308,10 +386,10 @@ function renderPlayers() {
       ? `<span>Live player list from the server${T.queryAddr ? ` <code>${esc(T.queryAddr)}</code>` : ""}</span>`
       : `<span>BattleMetrics: <b>${esc(T.serverName || (T.serverId ? "#" + T.serverId : "finding server…"))}</b></span>${T.serverId ? `<a href="https://www.battlemetrics.com/servers/rust/${T.serverId}" target="_blank" rel="noopener">Open on BattleMetrics</a>` : ""}`;
     const form = direct
-      ? `<form class="inline" id="trkAddr" style="margin:0 0 0 auto"><input name="v" placeholder="Server address, e.g. 123.45.67.89:28015" size="34" aria-label="Server address"><button class="ghost">Set address</button></form>`
-      : `<form class="inline" id="trkAddr" style="margin:0 0 0 auto"><input name="v" placeholder="BattleMetrics server link or ID" size="30" aria-label="BattleMetrics server"><button class="ghost">${T.serverId ? "Change server" : "Link server"}</button></form>`;
+      ? `<form class="inline" id="trkAddr"><input name="v" placeholder="Server address, e.g. 123.45.67.89:28015" size="34" aria-label="Server address"><button class="ghost">Set address</button></form>`
+      : `<form class="inline" id="trkAddr"><input name="v" placeholder="BattleMetrics server link or ID" size="30" aria-label="BattleMetrics server"><button class="ghost">${T.serverId ? "Change server" : "Link server"}</button></form>`;
     $("#bmStatus").innerHTML = `<div class="bm">${where}<span class="pill ${ok ? "ok" : "warn"}" style="white-space:normal">${ok ? "Updated " + (T.lastPoll ? ago(T.lastPoll) : "") : esc(T.status)}</span>${T.steamErr ? `<span class="pill warn" style="white-space:normal">Steam: ${esc(T.steamErr)}</span>` : ""}${form}<button class="ghost" onclick="act('/api/tracker/refresh',{})">Refresh now</button></div>
-      <p class="muted" style="margin-top:8px">${T.localMode
+      <p class="bmnote">${T.localMode
         ? "While you're in Rust on this server, RustWatch reads the same list as Shift+Tab → Players: real Steam names and IDs, even though the server hides names publicly. Players tracked by name are linked to their Steam profile automatically when their name shows up here. When you leave the game, RustWatch goes back to the server's own list."
         : direct
         ? "Names come straight from the server, the same way server browsers see them. Players tracked by name are matched by name; players tracked by Steam profile are followed through Steam, so they're found even when the server hides names or they rename." + (T.localState ? ` <br>In-game Steam list: ${esc(T.localState)}.` : "")
@@ -327,6 +405,11 @@ function renderPlayers() {
   }
 
   const now = Date.now() / 1000, span = 7 * 86400;
+  const tr = T.tracked || [], tOn = tr.filter((p) => p.online).length;
+  $("#plSummary").innerHTML = chip(T.total || (T.online || []).length, "On the server", "info") + chip(`${tOn}/${tr.length}`, "Tracked online", tOn ? "warn" : "") + chip((T.activity || []).filter((a) => a.joined && now - a.time < 3600).length, "Joined last hour");
+  $("#trackedCount").textContent = tr.length ? `${tOn} of ${tr.length} online` : "";
+  let ticks = "";
+  for (let d = 1; d < 7; d++) ticks += `<span class="daytick" style="left:${(d / 7) * 100}%"></span>`;
   $("#trackedList").innerHTML = (T.tracked || []).map((p) => {
     const bars = (p.sessions || []).filter((s) => (s.end || now) > now - span).map((s) => {
       const a = Math.max(s.start, now - span), b = s.end || now;
@@ -334,27 +417,27 @@ function renderPlayers() {
     }).join("");
     const state = p.online ? `<span class="pill ok">Online ${esc(p.onlineFor)}</span>` : `<span class="pill">${p.lastSeenAgo ? "Last seen " + esc(p.lastSeenAgo) + " ago" : "Not seen yet"}</span>`;
     const steam = p.steamId ? `<div class="sub">Steam: ${esc(p.presence || "")}${p.steamName && p.steamName !== p.name ? ` · now called <b>${esc(p.steamName)}</b>` : ""} · <a href="https://steamcommunity.com/profiles/${esc(p.steamId)}" target="_blank" rel="noopener">Profile</a></div>` : "";
-    return `<div class="trk"><span class="dot ${p.online ? "on" : ""}" style="margin-top:6px"></span>
-      <div><div class="name">${p.tag ? `<span class="tag" style="background:${esc(p.color || "#e0ad3e")}">${esc(p.tag)}</span>` : ""}${esc(p.name)}</div>
+    return `<div class="trk"><span class="bar4 ${p.online ? "on" : ""}"></span>
+      <div><div class="name">${p.tag ? `<span class="tag" style="background:${esc(p.color || "#d39432")}">${esc(p.tag)}</span>` : ""}${esc(p.name)}</div>
       <div class="sub">${state} · played ${esc(p.playtime24h)} in 24h, ${esc(p.playtime7d)} in 7 days${p.bmId && !direct ? ` · <a href="https://www.battlemetrics.com/players/${p.bmId}" target="_blank" rel="noopener">BattleMetrics</a>` : ""}</div>${steam}</div>
       <div class="acts"><label title="Alert me when they join or leave" class="muted" style="display:flex;gap:4px;align-items:center;font-size:13px"><input type="checkbox" ${p.notify ? "checked" : ""} onchange="retag('${p.bmId}','${esc(p.name)}',{notify:this.checked})">Alerts</label>
       <button class="ghost small" onclick="editTag('${p.bmId}','${esc(p.name)}')">Edit tag</button>${p.steamId ? "" : `<button class="ghost small" title="Follow them through their Steam profile instead of their name" onclick="linkSteam('${p.bmId}','${esc(p.name)}')">Link Steam</button>`}<button class="danger small" onclick="untrack('${p.bmId}','${esc(p.name)}','${esc(p.steamId || "")}')">Untrack</button></div>
-      <div class="timeline" title="Online time over the last 7 days">${bars}</div><div class="timeline-legend"><span>7 days ago</span><span>now</span></div></div>`;
+      <div class="timeline" title="Online time over the last 7 days">${ticks}${bars}</div><div class="timeline-legend"><span>7 days ago</span><span>now</span></div></div>`;
   }).join("") || `<div class="empty-note">Nobody tracked yet. Track someone from the online list, by name, or by Steam profile link.</div>`;
 
   const f = $("#onlineFilter").value.trim().toLowerCase();
   const on = (T.online || []).filter((p) => !f || p.name.toLowerCase().includes(f));
   const cnt = (T.online || []).length;
-  $("#onlineCount").textContent = T.total && T.shown && T.shown < T.total - 2 ? `(${cnt} of ${T.total})` : `(${cnt})`;
+  $("#onlineCount").textContent = T.total && T.shown && T.shown < T.total - 2 ? `${cnt} of ${T.total}` : `${cnt}`;
   let note = "";
-  if (T.censored && !T.localMode) note += `<div class="emptybox" style="margin-bottom:10px"><b>This server hides real player names.</b><p>Rust's <code>server.censorplayerlist</code> setting (on by default) swaps everyone's name for a random stand-in in the public player list, so these aren't Steam names and tracking by name won't match here. BattleMetrics can still show real names when the server owner has given it admin access, but that feed isn't public.</p><p><b>While you're in Rust on this server</b>, the <b>Seen in game</b> list below shows real Steam names of people you've recently played with (Steam's own list, up to 100). Track someone from there and they're followed by Steam profile from then on.</p><p><b>To follow someone while you're not in the game, track them by Steam profile:</b> paste their Steam profile link in “Track player”, or press <b>Link Steam</b> on someone you already track. ${T.steamOn ? "RustWatch then checks Steam every minute for which server they're on." : "This needs the free Steam Web API key in Settings → Kills."} It works as long as their Steam profile is public.</p></div>`;
+  if (T.censored && !T.localMode) note += `<details class="emptybox" style="margin-bottom:10px"${(namesOpen ?? !(T.tracked && T.tracked.length)) ? " open" : ""} ontoggle="namesOpen=this.open"><summary>This server hides real player names. <span>Why, and how to follow people anyway</span></summary><p>Rust's <code>server.censorplayerlist</code> setting (on by default) swaps everyone's name for a random stand-in in the public player list, so these aren't Steam names and tracking by name won't match here. BattleMetrics can still show real names when the server owner has given it admin access, but that feed isn't public.</p><p><b>While you're in Rust on this server</b>, the <b>Seen in game</b> list below shows real Steam names of people you've recently played with (Steam's own list, up to 100). Track someone from there and they're followed by Steam profile from then on.</p><p><b>To follow someone while you're not in the game, track them by Steam profile:</b> paste their Steam profile link in “Track player”, or press <b>Link Steam</b> on someone you already track. ${T.steamOn ? "RustWatch then checks Steam every minute for which server they're on." : "This needs the free Steam Web API key in Settings → Steam."} It works as long as their Steam profile is public.</p></details>`;
   if (T.total && T.shown && T.shown < T.total - 2) note += `<div class="muted" style="font-size:13px;margin-bottom:8px">${T.localMode ? `Steam lists ${T.shown} of the server's ${T.total} players — Steam only knows players it has seen on the server, so a few may be missing.` : `The server only sent ${T.shown} of its ${T.total} players — its reply is cut short, so some players never appear here.`}</div>`;
-  $("#onlineList").innerHTML = note + `<table><tbody>${on.map((p) => `<tr><td>${p.tracked ? `<span class="tag" style="background:${esc(p.color || "#e0ad3e")}">${esc(p.tag || "tracked")}</span>` : ""}${esc(p.name)}${p.id.startsWith("s:") ? ` <a class="muted" style="font-size:12px" href="https://steamcommunity.com/profiles/${esc(p.id.slice(2))}" target="_blank" rel="noopener">Steam</a>` : ""}</td><td class="num muted">${esc(p.onlineFor)}</td><td style="text-align:right">${p.tracked ? "" : `<button class="ghost small" onclick="quickTrack('${p.id}','${esc(p.name)}')">Track</button>`}</td></tr>`).join("")}</tbody></table>` + (on.length ? "" : `<div class="empty-note">${ok ? "No players match." : "Waiting for the player list…"}</div>`);
+  $("#onlineList").innerHTML = note + `<table><tbody>${on.map((p) => `<tr><td>${p.tracked ? `<span class="tag" style="background:${esc(p.color || "#d39432")}">${esc(p.tag || "tracked")}</span>` : ""}${esc(p.name)}${p.id.startsWith("s:") ? ` <a class="muted" style="font-size:12px" href="https://steamcommunity.com/profiles/${esc(p.id.slice(2))}" target="_blank" rel="noopener">Steam</a>` : ""}</td><td class="num muted">${esc(p.onlineFor)}</td><td style="text-align:right">${p.tracked ? "" : `<button class="ghost small" onclick="quickTrack('${p.id}','${esc(p.name)}')">Track</button>`}</td></tr>`).join("")}</tbody></table>` + (on.length ? "" : `<div class="empty-note">${ok ? "No players match." : "Waiting for the player list…"}</div>`);
   const rec = (T.recent || []).filter((p) => !f || p.name.toLowerCase().includes(f));
   $("#recentBlock").hidden = !(T.recent || []).length;
-  $("#recentCount").textContent = T.recent && T.recent.length ? `(${T.recent.length}${T.recentAt ? ", read " + ago(T.recentAt) : ""})` : "";
-  $("#recentList").innerHTML = `<table><tbody>${rec.map((p) => `<tr><td>${p.tracked ? `<span class="tag" style="background:${esc(p.color || "#e0ad3e")}">${esc(p.tag || "tracked")}</span>` : ""}${esc(p.name)} <a class="muted" style="font-size:12px" href="https://steamcommunity.com/profiles/${esc(p.id)}" target="_blank" rel="noopener">Steam</a></td><td class="num muted">${p.ago ? esc(p.ago) + " ago" : ""}</td><td style="text-align:right">${p.tracked ? "" : `<button class="ghost small" onclick="quickTrack('s:${esc(p.id)}','${esc(p.name)}')">Track</button>`}</td></tr>`).join("")}</tbody></table>`;
-  $("#activity").innerHTML = (T.activity || []).map((a) => `<div class="act"><span class="muted">${clock(a.time)}</span> <span class="${a.joined ? "j" : "l"}">${a.joined ? "joined" : "left"}</span> ${a.tag ? `<span class="tag" style="background:var(--event)">${esc(a.tag)}</span>` : ""}${esc(a.name)}</div>`).join("") || `<div class="empty-note">Joins and leaves appear here after the next update.</div>`;
+  $("#recentCount").textContent = T.recent && T.recent.length ? `${T.recent.length}${T.recentAt ? " · read " + ago(T.recentAt) : ""}` : "";
+  $("#recentList").innerHTML = `<table><tbody>${rec.map((p) => `<tr><td>${p.tracked ? `<span class="tag" style="background:${esc(p.color || "#d39432")}">${esc(p.tag || "tracked")}</span>` : ""}${esc(p.name)} <a class="muted" style="font-size:12px" href="https://steamcommunity.com/profiles/${esc(p.id)}" target="_blank" rel="noopener">Steam</a></td><td class="num muted">${p.ago ? esc(p.ago) + " ago" : ""}</td><td style="text-align:right">${p.tracked ? "" : `<button class="ghost small" onclick="quickTrack('s:${esc(p.id)}','${esc(p.name)}')">Track</button>`}</td></tr>`).join("")}</tbody></table>`;
+  $("#activity").innerHTML = (T.activity || []).map((a) => `<div class="act"><time>${clock(a.time)}</time><span class="${a.joined ? "j" : "l"}">${a.joined ? "Joined" : "Left"}</span><span>${a.tag ? `<span class="tag" style="background:var(--amber)">${esc(a.tag)}</span>` : ""}${esc(a.name)}</span></div>`).join("") || `<div class="empty-note">Joins and leaves appear here after the next update.</div>`;
 }
 $("#onlineFilter").addEventListener("input", renderPlayers);
 $("#trackForm").addEventListener("submit", (e) => {
@@ -387,7 +470,7 @@ function renderChat() {
   chatLen = c.length;
   const el = $("#chatLog");
   const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
-  el.innerHTML = c.map((m) => `<div class="msg ${m.bot ? "bot" : ""}"><time>${clock(m.time)}</time><b style="color:${/^#[0-9a-f]{3,8}$/i.test(m.color) ? m.color : "inherit"}">${esc(m.name)}</b>${esc(m.message)}</div>`).join("") || `<div class="empty-note">${S.active ? "No messages yet." : "Connect to a server first."}</div>`;
+  el.innerHTML = c.map((m) => `<div class="msg ${m.bot ? "bot" : ""}"><time>${clock(m.time)}</time><span class="team">[TEAM]</span><b style="color:${/^#[0-9a-f]{3,8}$/i.test(m.color) ? m.color : "inherit"}">${esc(m.name)}</b>${esc(m.message)}</div>`).join("") || `<div class="empty-note">${S.active ? "No messages yet." : "Connect to a server first."}</div>`;
   if (atBottom) el.scrollTop = el.scrollHeight;
 }
 $("#chatForm").addEventListener("submit", async (e) => {
@@ -460,10 +543,10 @@ function renderCommands() {
   $("#cmdList").innerHTML = groups.map(([g, list]) => {
     const rows = list.filter(match);
     if (!rows.length) return "";
-    return `<h2>${esc(g)}</h2><table class="cmds"><tbody>${rows.map(([name, args, desc, aliases = [], example = "", noTry]) => `<tr>
+    return `<div class="box cmdgroup"><h2>${esc(g)} <span class="hmeta">${rows.length}</span></h2><div class="pb flush"><table class="cmds"><tbody>${rows.map(([name, args, desc, aliases = [], example = "", noTry]) => `<tr>
       <td class="c"><code>${p}${esc(name)}</code>${args ? ` <span class="muted">${esc(args)}</span>` : ""}${aliases.length ? `<div class="alias">also ${aliases.map((a) => `<code>${p}${esc(a)}</code>`).join(" ")}</div>` : ""}</td>
       <td>${esc(desc)}${example ? `<div class="muted" style="font-size:13px">e.g. <code>${p}${esc(example)}</code></div>` : ""}</td>
-      <td style="text-align:right">${noTry ? "" : `<button class="ghost small" onclick="tryCmd('${esc(example || name)}')">Try</button>`}</td></tr>`).join("")}</tbody></table>`;
+      <td style="text-align:right">${noTry ? "" : `<button class="ghost small" onclick="tryCmd('${esc(example || name)}')">Try</button>`}</td></tr>`).join("")}</tbody></table></div></div>`;
   }).join("") || `<div class="empty-note">No command matches "${esc(f)}".</div>`;
   if (!$("#cmdOut").innerHTML) $("#cmdOut").innerHTML = `<div class="muted">Replies show here.${S.status !== "connected" ? " Connect to a server first — most commands need live data." : ""}</div>`;
 }
@@ -481,17 +564,19 @@ $("#cmdFilter").addEventListener("input", renderCommands);
 $("#itemForm").addEventListener("submit", async (e) => {
   e.preventDefault();
   const res = await api("/api/items/search?q=" + encodeURIComponent(e.target.q.value));
-  $("#itemResults").innerHTML = res.map((r) => `<div class="itemrow" tabindex="0" data-id="${r.id}">${icon(r.shortname)}<span>${esc(r.name)} <span class="muted">${esc(r.shortname)}</span></span></div>`).join("") || `<div class="empty-note">No matches.</div>`;
+  $("#itemCount").textContent = res.length ? `${res.length} found` : "";
+  $("#itemResults").innerHTML = res.map((r) => `<div class="itemrow" tabindex="0" data-id="${r.id}">${slotOf(r.shortname, r.name)}<span><b>${esc(r.name)}</b><br><span class="muted small">${esc(r.shortname)}</span></span></div>`).join("") || `<div class="empty-note pad">No matches.</div>`;
   $$(".itemrow").forEach((el) => { el.onclick = () => showItem(el.dataset.id); el.onkeydown = (k) => k.key === "Enter" && showItem(el.dataset.id); });
   if (res[0]) showItem(res[0].id);
 });
 async function showItem(id) {
   $$(".itemrow").forEach((el) => el.classList.toggle("sel", el.dataset.id == id));
   const d = await api("/api/items/" + id);
-  const list = (ys) => ys && ys.length ? `<ul>${ys.map((y) => `<li>${y.quantity}× ${esc(y.name)}${y.chance && y.chance < 1 ? ` <span class="muted">(${Math.round(y.chance * 100)}% chance)</span>` : ""}</li>`).join("")}</ul>` : `<p class="muted">Not recyclable.</p>`;
-  $("#itemDetail").innerHTML = `<div class="itemdetail"><h3>${icon(d.shortname)}${esc(d.name)}</h3><p class="muted">${esc(d.shortname)} · item ID ${d.id}</p>
-    <h2>Craft</h2>${d.craft ? `<ul>${d.craft.ingredients.map((i) => `<li>${i.quantity}× ${esc(i.name)}</li>`).join("")}</ul><p class="muted">Workbench: ${esc(d.craft.workbench)}${d.craft.time ? " · " + esc(d.craft.time) : ""}</p>` : `<p class="muted">Can't be crafted.</p>`}
-    <h2>Recycle (safe zone)</h2>${list(d.recycle)}<h2>Recycle (monument)</h2>${list(d.grecycle)}</div>`;
+  const cells = (ys) => `<div class="slots">${ys.map((y) => `<div class="cell">${slotOf(y.short, y.name, "x" + short(y.quantity))}<small>${esc(y.name)}${y.chance && y.chance < 1 ? `<br>${Math.round(y.chance * 100)}% chance` : ""}</small></div>`).join("")}</div>`;
+  const rec = (ys, label) => `<div class="sec"><h4>${label}</h4>${ys && ys.length ? cells(ys) : `<span class="muted">Not recyclable.</span>`}</div>`;
+  $("#itemDetail").innerHTML = `<div class="box itemdetail"><div class="hero">${slotOf(d.shortname, d.name)}<div><h3>${esc(d.name)}</h3><p>${esc(d.shortname)} · item ID ${d.id}</p></div></div>
+    <div class="sec"><h4>Crafting cost${d.craft ? `<span>${d.craft.time ? esc(d.craft.time) : ""}</span>` : ""}</h4>${d.craft ? cells(d.craft.ingredients) + `<p style="margin:12px 0 0">Workbench <span class="wb">${esc(d.craft.workbench)}</span></p>` : `<span class="muted">Can't be crafted.</span>`}</div>
+    ${rec(d.recycle, "Recycles into (safe zone)")}${rec(d.grecycle, "Recycles into (monument)")}</div>`;
 }
 
 /* ---------- alerts ---------- */
@@ -499,7 +584,9 @@ function renderAlerts() {
   const sel = $("#alertFilter");
   if (sel.options.length === 1) S.alertKinds.forEach((k) => sel.add(new Option(k.label, k.key)));
   const f = sel.value;
-  $("#alertLog").innerHTML = (S.log || []).filter((e) => !f || e.kind === f).slice().reverse().map((e) => `<div class="al"><time>${new Date(e.time * 1000).toLocaleString()}</time><b>${esc(e.title)}</b><div class="muted">${esc(e.text)}</div></div>`).join("") || `<div class="empty-note">No alerts yet.</div>`;
+  const list = (S.log || []).filter((e) => !f || e.kind === f);
+  $("#alertTotal").textContent = list.length ? `${list.length}` : "";
+  $("#alertLog").innerHTML = list.slice().reverse().map((e) => alertRow(e, true)).join("") || `<div class="empty-note pad">No alerts yet.</div>`;
 }
 $("#alertFilter").addEventListener("change", renderAlerts);
 $("#clearLog").addEventListener("click", () => act("/api/log/clear", {}));
@@ -507,7 +594,7 @@ $("#clearLog").addEventListener("click", () => act("/api/log/clear", {}));
 /* ---------- servers & steam ---------- */
 function renderServers() {
   const st = S.steam;
-  $("#steamBox").innerHTML = `<div class="steam">${st.linked ? `<p><span class="pill ok">Steam linked</span> ${st.steamId ? `<span class="muted">Steam ID ${esc(st.steamId)}</span>` : ""} · push listener: ${esc(st.status)}</p>
+  $("#steamBox").innerHTML = `<div class="steam ${st.linked ? "" : "unlinked"}">${st.linked ? `<p><span class="pill ok">Steam linked</span> ${st.steamId ? `<span class="muted">Steam ID ${esc(st.steamId)}</span>` : ""} · push listener: ${esc(st.status)}</p>
       <p>To add a server or device: in Rust press <b>Esc → Rust+ → Pair with server</b>, or hold <b>E</b> on a smart switch, alarm or storage monitor and choose <b>Pair</b>. It shows up here within a few seconds.</p>
       <button class="ghost small" onclick="if(confirm('Unlink Steam? You will stop receiving pairing requests and alarm pushes.'))act('/api/steam/unlink',{})">Unlink Steam</button>`
     : `<h2 style="margin-top:0">Link your Steam account</h2>
@@ -515,10 +602,10 @@ function renderServers() {
       <p class="muted">The login window uses its own clean browser profile, so you'll need to sign in to Steam once even if you're signed in normally. Your usual browser profile, tabs and passwords aren't touched.</p>
       ${st.status && st.status !== "not linked" ? `<p>${/^error/.test(st.status) ? '<span class="pill bad">Problem</span> ' : ""}${esc(st.status)}</p>` : ""}
       ${st.pairing ? `<button disabled>Waiting for Steam login…</button> <button class="ghost" onclick="act('/api/steam/cancel',{})">Cancel</button>` : `<button onclick="act('/api/steam/link',{})">${/^error/.test(st.status) ? "Try again" : "Sign in with Steam"}</button>`}`}</div>`;
-  $("#serverList").innerHTML = (S.servers || []).map((s) => `<div class="srvrow">${s.img ? `<img src="${esc(s.img)}" alt="">` : ""}<div class="n"><b>${esc(s.name || s.ip)}</b><small>${esc(s.ip)}:${s.port} · ${s.devices} device${s.devices === 1 ? "" : "s"}</small></div>
+  $("#serverList").innerHTML = (S.servers || []).map((s) => `<div class="srvrow ${s.active ? "active" : ""}">${s.img ? `<img src="${esc(s.img)}" alt="" onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'noimg'}))">` : `<span class="noimg"></span>`}<div class="n"><b>${esc(s.name || s.ip)}</b><small>${esc(s.ip)}:${s.port} · ${s.devices} device${s.devices === 1 ? "" : "s"}</small></div>
     <label class="muted" style="display:flex;gap:5px;align-items:center;font-size:13px" title="Use if a direct connection is blocked by your network"><input type="checkbox" ${s.useProxy ? "checked" : ""} onchange="act('/api/servers/proxy',{id:'${esc(s.id)}',useProxy:this.checked})">Facepunch proxy</label>
     ${s.active ? `<span class="pill ok">Active</span><button class="ghost small" onclick="act('/api/servers/disconnect',{})">Disconnect</button>` : `<button class="small" onclick="act('/api/servers/connect',{id:'${esc(s.id)}'})">Connect</button>`}
-    <button class="danger small" onclick="if(confirm('Remove this server?'))act('/api/servers/remove',{id:'${esc(s.id)}'})">Remove</button></div>`).join("") || `<div class="empty-note">No servers yet. Link Steam above, then pair from inside Rust.</div>`;
+    <button class="danger small" onclick="if(confirm('Remove this server?'))act('/api/servers/remove',{id:'${esc(s.id)}'})">Remove</button></div>`).join("") || `<div class="empty-note pad">No servers yet. Link Steam above, then pair from inside Rust.</div>`;
 }
 $("#manualForm").addEventListener("submit", (e) => {
   e.preventDefault();
@@ -534,7 +621,7 @@ function renderSettings(force) {
   const row = (label, input, hint = "") => `<div class="set"><label>${label}</label>${input}${hint ? `<div class="hint">${hint}</div>` : ""}</div>`;
   const num = (k, min = 1) => `<input type="number" min="${min}" name="${k}" value="${s[k]}" style="width:110px">`;
   const chk = (k) => `<input type="checkbox" name="${k}" ${s[k] ? "checked" : ""}>`;
-  $("#settingsForm").innerHTML = `
+  const html = `
     <h2>Team chat bot</h2>
     ${row("Answer chat commands", chk("chatCommands"), "Teammates can type commands like !pop in team chat.")}
     ${row("Command prefix", `<select name="prefix" style="width:80px">${["!", ".", ",", ":", ";"].map((p) => `<option ${p === s.prefix ? "selected" : ""}>${p}</option>`).join("")}</select>`)}
@@ -546,19 +633,19 @@ function renderSettings(force) {
     ${row("Mark teammate AFK after (minutes)", num("afkMinutes"))}
     ${row("Warn when upkeep below (hours)", num("upkeepAlertHours", 0))}
     <h2>Event spawn timing</h2>
-    <p class="muted" style="max-width:72ch">Rust picks a random delay in this range for patrol heli, cargo and the chinook drop, counting from server start (not affected by population). RustWatch times the first one from the wipe or a server restart, restarts the clock each time it sees the event, and switches to this server's real timing after a few sightings — so modded servers are handled too.</p>
+    <p class="muted small" style="margin-top:0">Rust picks a random delay in this range for patrol heli, cargo and the chinook drop, counting from server start (not affected by population). RustWatch times the first one from the wipe or a server restart, restarts the clock each time it sees the event, and switches to this server's real timing after a few sightings — so modded servers are handled too.</p>
     ${(S.forecasts || []).map((f) => { const w = (s.eventWindows || {})[f.kind] || [2, 4]; return row(esc(f.label) + " every", `<span class="inline" style="margin:0"><input type="number" step="0.25" min="0.25" name="ew_${f.kind}_0" value="${w[0]}" style="width:80px"> to <input type="number" step="0.25" min="0.25" name="ew_${f.kind}_1" value="${w[1]}" style="width:80px"> hours</span>`, esc(f.source)); }).join("")}
     <div class="set"><span></span><span><button type="button" class="ghost small" onclick="if(confirm('Forget the event timings RustWatch has learned for this server?'))act('/api/events/reset-learning',{},'Learned timings cleared')">Forget learned timings</button></span></div>
     <h2>Player tracker</h2>
     ${row("Player list refresh (seconds)", num("bmPollSeconds", 30))}
     ${row("BattleMetrics API key", `<input name="bmToken" type="password" value="${esc(s.bmToken)}" placeholder="optional, needs a paid plan" style="width:340px">`, "Leave empty to read the player list straight from the server (free). BattleMetrics has required a paid subscription since July 2026; with a key, tracked players are followed by BattleMetrics ID even if they change name.")}
-    <h2>Kills</h2>
+    <h2>Steam</h2>
     ${row("Steam Web API key", `<input name="steamApiKey" type="password" value="${esc(s.steamApiKey || "")}" placeholder="free, from steamcommunity.com/dev/apikey" style="width:340px">`, `Shows teammates' kills, deaths and hours from Steam, and lets the player tracker follow people by Steam profile (works on servers that hide names). Get one free at <a href="https://steamcommunity.com/dev/apikey" target="_blank" rel="noopener">steamcommunity.com/dev/apikey</a> (any domain name works). Teammates need public game details on Steam.`)}
     <h2>Alerts</h2>
     ${row("Windows notifications", `<span>${notifyStatus()}</span>`, "Shown while the RustWatch window is open. Choose which alerts use them in the table below.")}
     ${row("Play a sound in the app", chk("sound"))}
     ${row("Discord webhook", `<input name="discordWebhook" value="${esc(s.discordWebhook)}" placeholder="https://discord.com/api/webhooks/…" style="width:100%">`, "Server settings → Integrations → Webhooks → New webhook → Copy URL.")}
-    <table class="routes" style="max-width:900px;margin-top:10px"><thead><tr><th>Alert</th><th>Desktop</th><th>Team chat</th><th>Discord</th></tr></thead><tbody>
+    <table class="routes" style="margin-top:10px"><thead><tr><th>Alert</th><th>Desktop</th><th>Team chat</th><th>Discord</th></tr></thead><tbody>
     ${S.alertKinds.map((k) => { const r = s.alerts[k.key] || {}; return `<tr><td>${esc(k.label)}</td>${["desktop", "chat", "discord"].map((c) => `<td><input type="checkbox" data-route="${k.key}" data-ch="${c}" ${r[c] ? "checked" : ""} aria-label="${esc(k.label)} ${c}"></td>`).join("")}</tr>`; }).join("")}
     </tbody></table>
     <h2 id="updBox">Updates</h2>
@@ -570,7 +657,15 @@ function renderSettings(force) {
     ${row("Move data folder to", `<span class="inline" style="margin:0"><input id="newDataDir" placeholder="D:\\Games\\RustWatch" style="width:340px" aria-label="New data folder"><button type="button" class="ghost" onclick="moveData()">Move and restart</button></span>`, "Your settings and logs are copied over and RustWatch restarts. The old folder is left as it was, so you can delete it.")}
     <h2>App</h2>
     ${row("Keep running after closing the window", chk("keepRunning"), "Alerts keep coming while the window is closed. Start RustWatch again to reopen it.")}
-    <div class="inline" style="margin-top:22px"><button>Save settings</button><button type="button" class="ghost" onclick="act('/api/notify/test',{},'Test sent')">Send test notification</button><button type="button" class="danger" onclick="if(confirm('Quit RustWatch? Alerts stop until you start it again.'))api('/api/quit',{})">Quit RustWatch</button><span class="muted">Version ${esc(S.version)}</span></div>`;
+    <div class="savebar"><button>Save settings</button><button type="button" class="ghost" onclick="act('/api/notify/test',{},'Test sent')">Send test notification</button><button type="button" class="danger" onclick="if(confirm('Quit RustWatch? Alerts stop until you start it again.'))api('/api/quit',{})">Quit RustWatch</button><span class="muted">Version ${esc(S.version)}</span></div>`;
+  // each heading becomes a panel, listed in the side index
+  const cut = html.indexOf('<div class="savebar">');
+  const parts = html.slice(0, cut).split(/(?=<h2)/).filter((x) => x.trim());
+  const secs = parts.map((x, i) => { const m = /^<h2([^>]*)>([^<]*)<\/h2>/.exec(x.trim()); return { id: "set-" + i, title: m ? m[2] : "", attrs: m ? m[1] : "", body: m ? x.trim().slice(m[0].length) : x }; });
+  $("#settingsForm").innerHTML = secs.map((x) => `<div class="box" id="${x.id}"><h2${x.attrs}>${x.title}</h2><div class="pb">${x.body}</div></div>`).join("") + html.slice(cut);
+  const sec = $("section[data-panel=settings]");
+  sec.onscroll = () => { let cur = secs[0].id; for (const x of secs) if ($("#" + x.id).getBoundingClientRect().top < 160) cur = x.id; $$("#setNav a").forEach((a) => a.classList.toggle("on", a.getAttribute("href") === "#" + cur)); };
+  $("#setNav").innerHTML = secs.map((x, i) => `<a href="#${x.id}" class="${i ? "" : "on"}" onclick="event.preventDefault();$('#${x.id}').scrollIntoView({behavior:'smooth',block:'start'});$$('#setNav a').forEach((a)=>a.classList.toggle('on',a===this))">${x.title}</a>`).join("");
 }
 $("#settingsForm").addEventListener("input", () => { settingsDirty = true; });
 $("#settingsForm").addEventListener("submit", (e) => {
@@ -644,7 +739,7 @@ let pinnedTip = null;
 function corrected(size) { const r = size % GRID; return r < 120 ? size - r : size + GRID - r; }
 function colName(n) { let s = ""; n++; while (n > 0) { n--; s = String.fromCharCode(65 + (n % 26)) + s; n = Math.floor(n / 26); } return s; }
 function outlinedText(ctx, text, x, y, fill = "#fff", size = 12, weight = 600, align = "center") {
-  ctx.font = `${weight} ${size}px Bahnschrift, "Segoe UI", sans-serif`; ctx.textAlign = align; ctx.textBaseline = "middle";
+  ctx.font = `${weight} ${size}px "RW Condensed", Bahnschrift, sans-serif`; ctx.textAlign = align; ctx.textBaseline = "middle";
   ctx.lineJoin = "round"; ctx.lineWidth = 3.5; ctx.strokeStyle = "rgba(12,14,16,.9)"; ctx.strokeText(text, x, y);
   ctx.fillStyle = fill; ctx.fillText(text, x, y);
 }
@@ -729,7 +824,7 @@ class MapView {
       for (let i = 0; i <= n; i++) { ctx.moveTo(x0 + i * cell, y0); ctx.lineTo(x0 + i * cell, y0 + n * cell); ctx.moveTo(x0, y0 + i * cell); ctx.lineTo(x0 + n * cell, y0 + i * cell); }
       ctx.stroke();
       if (cell > 20) {
-        ctx.fillStyle = "rgba(0,0,0,.6)"; ctx.font = `600 ${Math.max(8, Math.min(13, cell / 3.2))}px Bahnschrift, sans-serif`; ctx.textAlign = "left"; ctx.textBaseline = "top";
+        ctx.fillStyle = "rgba(0,0,0,.6)"; ctx.font = `600 ${Math.max(8, Math.min(13, cell / 3.2))}px "RW Condensed", Bahnschrift, sans-serif`; ctx.textAlign = "left"; ctx.textBaseline = "top";
         for (let cx = 0; cx < n; cx++) for (let cy = 0; cy < n; cy++) ctx.fillText(colName(cx) + cy, x0 + cx * cell + 2, y0 + cy * cell + 2);
       }
     }
@@ -850,31 +945,40 @@ function renderSounds() {
   const on = !S.settings.soundOff;
   const lvl = Math.max(0, Math.min(1, ((V.level ?? -90) + 60) / 60));
   const ok = !!V.mode;
-  $("#sndStatus").innerHTML = `<div class="bm"><span class="pill ${ok ? "ok" : "warn"}" style="white-space:normal">${esc(V.state || "")}</span>
-    ${ok ? `<span class="meter" title="Game audio level"><i style="width:${(lvl * 100).toFixed(0)}%"></i></span>` : ""}
-    <label class="muted" style="display:flex;gap:6px;align-items:center;margin-left:auto"><input type="checkbox" ${on ? "checked" : ""} onchange="setSoundOn(this.checked)">Listen for event sounds</label></div>`;
-
   const evs = V.events || [];
+  const taught = evs.filter((e) => (V.cues || []).some((c) => c.event === e.key)).length;
+  const R = S.raid || {};
+  $("#sndSummary").innerHTML = chip(ok ? "On" : "Off", "Game audio", ok ? "ok" : "warn") + chip(`${taught}/${evs.length}`, "Events taught", taught ? "ok" : "") + chip((V.heard || []).length, "Heard") + chip(R.active ? R.active.Count : (R.blasts || []).length, R.active ? "Raid blasts" : "Explosions", R.active ? "bad" : "");
+  $("#sndStatus").innerHTML = `<div class="bm"><span class="pill ${ok ? "ok" : "warn"}" style="white-space:normal">${esc(V.state || "")}</span>
+    ${ok ? `<span class="muted small">Level</span><span class="meter" title="Game audio level"><i style="width:${(lvl * 100).toFixed(0)}%"></i></span>` : ""}
+    <label class="muted" style="display:flex;gap:6px;align-items:center;margin-left:auto"><input type="checkbox" ${on ? "checked" : ""} onchange="setSoundOn(this.checked)">Listen for event sounds</label></div><div style="height:12px"></div>`;
   $("#sndEvents").innerHTML = evs.map((e) => {
     const cues = (V.cues || []).filter((c) => c.event === e.key);
-    const close = (V.closest || {})[e.key];
-    return `<div class="sndev"><div><b>${esc(e.label)}</b> ${cues.length ? `<span class="pill ok">${cues.length} saved</span>` : `<span class="pill">not taught</span>`}
-      ${close > 0.05 ? `<span class="muted" style="font-size:12px" title="How close the latest audio came to this sound (1 = certain)"> closest lately ${close.toFixed(2)}</span>` : ""}</div>
-      <div class="muted" style="font-size:13px">${esc(e.hint)}</div>
-      ${cues.map((c) => `<div class="cue"><button class="ghost small" onclick="playCue('${esc(c.id)}')">Play</button><span class="muted">${c.seconds}s, saved ${c.created ? new Date(c.created * 1000).toLocaleString() : ""}</span><button class="danger small" onclick="delCue('${esc(c.id)}')">Delete</button></div>`).join("")}</div>`;
+    const close = (V.closest || {})[e.key] || 0;
+    return `<div class="sndev"><div class="top"><b>${esc(e.label)}</b> ${cues.length ? `<span class="pill ok">${cues.length} saved</span>` : `<span class="pill">Not taught</span>`}
+      <span class="closeness" title="How close the latest audio came to this sound (1 = certain)">closest lately <span class="meter"><i style="width:${Math.min(100, close * 100)}%"></i></span> ${close.toFixed(2)}</span></div>
+      <div class="muted small">${esc(e.hint)}</div>
+      ${cues.map((c) => `<div class="cue"><button class="ghost small" onclick="playCue('${esc(c.id)}')">Play</button><span class="muted">${c.seconds}s, saved ${c.created ? new Date(c.created * 1000).toLocaleString([], { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : ""}</span><button class="danger small" onclick="delCue('${esc(c.id)}')">Delete</button></div>`).join("")}</div>`;
   }).join("");
   renderRaid();
-  $("#sndHeard").innerHTML = (V.heard || []).map((h) => `<div class="al"><time>${clock(h.time)}</time><b>${esc(h.label)}</b> <span class="muted">${Math.round(h.match * 100)}% match</span></div>`).join("") || `<div class="empty-note">Nothing heard yet.</div>`;
-  if (!teach) $("#sndEditor").innerHTML = `<div class="empty-note">${ok ? "When you hear a cue in game, press the button above within 30 seconds." : "Start Rust to record game audio."}</div>`;
+  $("#sndHeard").innerHTML = (V.heard || []).map((h) => `<div class="al"><time>${clock(h.time)}</time><b>${esc(h.label)}</b><div class="muted">${Math.round(h.match * 100)}% match</div></div>`).join("") || `<div class="empty-note">Nothing heard yet.</div>`;
+  if (!teach) $("#sndEditor").innerHTML = `<div class="empty-note">${ok ? "Nothing captured yet." : "Start Rust to record game audio."}</div>`;
+}
+// small compass: where you faced (up) and the side the blast came from
+function compass(b) {
+  const m = /^(\d+)° (left|right)/.exec(b.side || ""), rel = m ? (+m[1]) * (m[2] === "left" ? -1 : 1) : 0;
+  const r = (a, len) => [15 + Math.sin(a * Math.PI / 180) * len, 15 - Math.cos(a * Math.PI / 180) * len];
+  const [x1, y1] = r(rel, 12), [x2, y2] = r(180 - rel, 12);
+  return `<svg class="compass" viewBox="0 0 30 30" aria-hidden="true"><circle cx="15" cy="15" r="13" fill="#1b1a17" stroke="#3a3630"/><path d="M15 4l2.5 4h-5z" fill="#6f685e"/><line x1="15" y1="15" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}" stroke="#c9402c" stroke-width="1.6" stroke-dasharray="2 2" opacity=".6"/><line x1="15" y1="15" x2="${x1.toFixed(1)}" y2="${y1.toFixed(1)}" stroke="#f6b8ad" stroke-width="2"/><circle cx="15" cy="15" r="2" fill="#e4dcd1"/></svg>`;
 }
 function renderRaid() {
   const R = S.raid || {}, on = !S.settings.raidOff;
   const ra = R.active;
-  let h = `<div class="bm"><span class="pill ${R.templates && on ? "ok" : "warn"}" style="white-space:normal">${!on ? "Off" : R.templates ? `Listening for explosions (${R.templates} sounds known)` : "No explosion sounds installed"}</span>
-    <label class="muted" style="display:flex;gap:6px;align-items:center;margin-left:auto"><input type="checkbox" ${on ? "checked" : ""} onchange="setRaidOn(this.checked)">Call out raids in team chat</label></div>
-    <p class="muted" style="max-width:75ch">When 4 or more explosions (C4, rockets, satchels, catapults…) agree on a spot within a minute, RustWatch posts an estimated grid to team chat and marks it on the map. Direction comes from your left/right audio and the way you're facing in Rust+, distance from which version of the sound the game played (close, distant or really distant), so treat it as a rough area. Normal stereo can't tell front from back: turning between blasts lets RustWatch work out which side it's on. Gunfire and grenades are ignored.</p>`;
-  if (ra) h += `<div class="emptybox" style="margin:10px 0"><b>${ra.Located ? "Current estimate on the map" : "Explosions heard, direction unknown"}</b><p>${ra.Count} explosions since ${clock(Date.parse(ra.Start) / 1000)}, last ${ago(Date.parse(ra.LastBlast) / 1000)}.${ra.Ambiguous ? " Front or back is still unsure, so both spots are shown." : ""}</p></div>`;
-  h += (R.blasts || []).map((b) => `<div class="al"><time>${clock(b.time)}</time><b>${esc(b.kind)}</b> <span class="muted">${esc(b.dist)} · ${esc(b.side)} of where you faced${b.bearings ? ` · bearing ${b.bearings[0]}° or ${b.bearings[1]}°` : ""} · ${Math.round(b.match * 100)}% match</span></div>`).join("") || `<div class="empty-note">No raid explosions heard yet.</div>`;
+  let h = `<div class="inline" style="margin-bottom:8px"><span class="pill ${R.templates && on ? "ok" : "warn"}" style="white-space:normal">${!on ? "Off" : R.templates ? `Listening for explosions · ${R.templates} sounds known` : "No explosion sounds installed"}</span>
+    <label class="muted" style="display:flex;gap:6px;align-items:center;margin-left:auto"><input type="checkbox" ${on ? "checked" : ""} onchange="setRaidOn(this.checked)">Call out raids in team chat</label></div>`;
+  if (ra) h += `<div class="raidnow" style="margin-bottom:10px"><b>${ra.Located ? "Raid heard" : "Explosions heard, direction unknown"}: ${ra.Count} explosions</b><div>${raidWhere(ra)}</div><div class="muted small">Since ${clock(Date.parse(ra.Start) / 1000)}, last ${ago(Date.parse(ra.LastBlast) / 1000)}.${ra.Ambiguous ? " Front or back is still unsure, so both spots are on the map." : ""} <a href="#" onclick="setTab('map');return false">Show on map</a></div></div>`;
+  h += `<div class="cols"><div>${(R.blasts || []).slice(0, 10).map((b) => `<div class="blast"><time>${clock(b.time)}</time>${compass(b)}<div><b>${esc(b.kind)}</b> <span class="m">${esc(b.dist)}</span><div class="m">${esc(b.side)} of where you faced${b.bearings ? ` · bearing ${b.bearings[0]}° or ${b.bearings[1]}°` : ""}</div></div><span class="m">${Math.round(b.match * 100)}%</span></div>`).join("") || `<div class="empty-note">No raid explosions heard yet.</div>`}</div>
+    <p class="muted small" style="margin:0">When 4 or more explosions (C4, rockets, satchels, catapults…) agree on a spot within a minute, RustWatch posts an estimated grid to team chat and marks it on the map. Direction comes from your left/right audio and the way you're facing in Rust+; distance from which version of the sound the game played (close, distant or really distant), so treat it as a rough area. Stereo can't tell front from back: turning between blasts settles it. Gunfire and grenades are ignored.</p></div>`;
   $("#raidBox").innerHTML = h;
 }
 window.setRaidOn = (v) => { const s = { ...S.settings, raidOff: !v }; act("/api/settings", s); };
@@ -915,7 +1019,7 @@ $("#sndCapture").addEventListener("click", async () => {
 function drawTeach() {
   const t = teach;
   const opts = (S.sounds.events || []).map((e) => `<option value="${e.key}" ${e.key === t.event ? "selected" : ""}>${esc(e.label)}</option>`).join("");
-  $("#sndEditor").innerHTML = `<p class="muted" style="font-size:13px;margin-top:0">${t.imported ? "If the file is just the sound, keep the whole thing selected. Otherwise drag" : "Drag"} across the picture to select just the sound (cues show up as bright lines or a bright band). Play it back to check, then save it.</p>
+  $("#sndEditor").innerHTML = `<p class="muted small" style="margin-top:0">${t.imported ? "If the file is just the sound, keep the whole thing selected. Otherwise drag" : "Drag"} across the picture to select just the sound (cues show up as bright lines or a bright band). Play it back to check, then save it.</p>
     <div class="sndclip" id="sndClip"><img src="/api/sounds/clip?img=1&id=${t.id}" alt="Spectrogram of the captured audio" draggable="false"><canvas></canvas></div>
     <div class="timeline-legend"><span>${t.imported ? esc(t.file || "start") : Math.round(t.seconds) + " s ago"}</span><span id="sndSel"></span><span>${t.imported ? Math.round(t.seconds) + " s" : "now"}</span></div>
     <div class="inline" style="margin-top:10px;flex-wrap:wrap"><button class="ghost" id="sndPlay">Play selection</button>
@@ -929,7 +1033,7 @@ function drawTeach() {
     const c = cv.getContext("2d"); c.setTransform(dpr, 0, 0, dpr, 0, 0);
     const x0 = (t.from / t.seconds) * r.width, x1 = (t.to / t.seconds) * r.width;
     c.fillStyle = "rgba(0,0,0,.55)"; c.fillRect(0, 0, x0, r.height); c.fillRect(x1, 0, r.width - x1, r.height);
-    c.strokeStyle = "#e0ad3e"; c.lineWidth = 2; c.strokeRect(x0, 1, x1 - x0, r.height - 2);
+    c.strokeStyle = "#d39432"; c.lineWidth = 2; c.strokeRect(x0, 1, x1 - x0, r.height - 2);
     // waveform strip along the bottom
     const strip = (34 / 194) * r.height, w = t.wave || [], h = strip - 6, base = r.height - strip / 2;
     c.fillStyle = "rgba(255,255,255,.55)";

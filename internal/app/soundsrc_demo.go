@@ -1,6 +1,7 @@
 package app
 
 import (
+	"fmt"
 	"math"
 	"math/rand"
 	"time"
@@ -44,4 +45,43 @@ func (d demoAudio) Run(stop <-chan struct{}, feed func(l, r []float32), started 
 }
 
 // DemoAudio makes sound detection listen to simulated game audio.
-func (a *App) DemoAudio() { a.sounds.src = demoAudio{start: time.Now()} }
+func (a *App) DemoAudio() {
+	a.sounds.src = demoAudio{start: time.Now()}
+	go a.demoRaid()
+}
+
+// demoRaid fakes a raid north-east of you every 10 minutes (starting shortly after launch),
+// so the raid panel, map ring and overview card can be seen in demo mode.
+func (a *App) demoRaid() {
+	time.Sleep(12 * time.Second)
+	for {
+		var px, py float64
+		a.mu.Lock()
+		if a.team != nil && a.srv != nil {
+			for _, m := range a.team.Members {
+				if fmt.Sprint(m.SteamID) == a.srv.PlayerID {
+					px, py = float64(m.X), float64(m.Y)
+				}
+			}
+		}
+		a.mu.Unlock()
+		r := a.sounds.raid
+		now := time.Now()
+		kinds := []string{"c4", "rocket", "c4", "rocket", "satchel", "c4", "rocket"}
+		rx, ry := px+190, py+180 // ~260 m to the north-east
+		ax, ay := px-190, py-180 // the spot behind, before front/back is settled
+		r.mu.Lock()
+		if r.ntpl == 0 {
+			r.ntpl = 230
+		}
+		for i, k := range kinds {
+			r.blasts = append(r.blasts, raidBlast{At: now.Add(-time.Duration(len(kinds)-1-i) * 8 * time.Second), Kind: k, Dist: "distant",
+				Score: 0.62 + 0.04*float64(i%4), Rel: 38 + float64(i%3)*3, HavePose: true, PX: px, PY: py, Yaw: 8,
+				Cand: [2][2]float64{{rx, ry}, {ax, ay}}})
+		}
+		r.cur = &raidState{Start: now.Add(-48 * time.Second), LastBlast: now, LastPost: now, Posted: len(kinds),
+			X: rx, Y: ry, AltX: ax, AltY: ay, Ambiguous: true, Located: true, Count: len(kinds)}
+		r.mu.Unlock()
+		time.Sleep(10 * time.Minute)
+	}
+}
