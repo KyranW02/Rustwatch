@@ -10,7 +10,7 @@ import (
 	"rustwatch/internal/fakerust"
 )
 
-func localTestApp(t *testing.T, addr func(q string) string) (*App, *fakerust.Server, func()) {
+func localTestApp(t *testing.T, addr func(q string) string, full bool) (*App, *fakerust.Server, func()) {
 	fs := fakerust.New()
 	fs.CensorNames = true
 	if err := fs.Start("127.0.0.1:0"); err != nil {
@@ -22,13 +22,17 @@ func localTestApp(t *testing.T, addr func(q string) string) (*App, *fakerust.Ser
 	port, _ := strconv.Atoi(p)
 	a.ConnectServer(a.AddServer(ServerConfig{IP: host, Port: port, PlayerID: "1", PlayerToken: 1, QueryHint: qaddr,
 		Tracked: []TrackedPlayer{{Name: "xXSnipeKingXx", Tag: "Enemy", Notify: true}}}))
-	a.DemoLocalSteam(fs.OnlineSteam, addr(qaddr))
+	if full {
+		a.demoFullList(fs.OnlineSteam, addr(qaddr))
+	} else {
+		a.DemoLocalSteam(fs.OnlineSteam, addr(qaddr))
+	}
 	go a.tracker.run()
 	return a, fs, func() { a.Disconnect(); time.Sleep(100 * time.Millisecond); fs.Close() }
 }
 
 func TestLocalSteamListOnCensoredServer(t *testing.T) {
-	a, _, done := localTestApp(t, func(q string) string { return q })
+	a, _, done := localTestApp(t, func(q string) string { return q }, true)
 	defer done()
 	waitFor(t, "local list", func() bool { a.mu.Lock(); defer a.mu.Unlock(); return a.tracker.localMode && a.tracker.status == "ok" })
 	a.mu.Lock()
@@ -55,7 +59,7 @@ func TestLocalSteamListOnCensoredServer(t *testing.T) {
 }
 
 func TestLocalSteamOtherServerIgnored(t *testing.T) {
-	a, _, done := localTestApp(t, func(string) string { return "203.0.113.9:28015" })
+	a, _, done := localTestApp(t, func(string) string { return "203.0.113.9:28015" }, true)
 	defer done()
 	waitFor(t, "poll", func() bool { a.mu.Lock(); defer a.mu.Unlock(); return a.tracker.status == "ok" })
 	a.mu.Lock()
@@ -63,5 +67,36 @@ func TestLocalSteamOtherServerIgnored(t *testing.T) {
 	a.mu.Unlock()
 	if v.LocalMode || !strings.Contains(v.LocalState, "not the server RustWatch is showing") || !v.Censored {
 		t.Fatalf("localMode=%v state=%q", v.LocalMode, v.LocalState)
+	}
+}
+
+// Real Steam: no full list, but "recently played with" has real names.
+func TestLocalSteamRecent(t *testing.T) {
+	a, _, done := localTestApp(t, func(q string) string { return q }, false)
+	defer done()
+	waitFor(t, "recent", func() bool {
+		a.mu.Lock()
+		defer a.mu.Unlock()
+		return len(a.tracker.recent) > 0 && a.tracker.status == "ok"
+	})
+	a.mu.Lock()
+	v := a.tracker.viewLocked()
+	sid := a.srv.Tracked[0].SteamID
+	stats := a.tracker.recentStatsLocked()
+	a.mu.Unlock()
+	if v.LocalMode || len(v.Recent) < 8 || v.Recent[0].Name != "Bob" || v.Recent[0].Ago == "" {
+		t.Fatalf("recent %+v", v.Recent)
+	}
+	if sid != "76561198000001002" {
+		t.Fatalf("name-tracked player not linked: %q", sid)
+	}
+	tracked := false
+	for _, r := range v.Recent {
+		if r.Name == "xXSnipeKingXx" && r.Tracked && r.Tag == "Enemy" {
+			tracked = true
+		}
+	}
+	if !tracked || !strings.Contains(stats, "distinct times") {
+		t.Fatalf("tracked=%v stats=%q", tracked, stats)
 	}
 }

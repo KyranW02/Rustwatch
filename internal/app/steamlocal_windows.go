@@ -241,7 +241,7 @@ type friendGameInfo struct {
 
 func (s *steamAPI) snapshot(hint uint64) localSnap {
 	s.call("SteamAPI_RunCallbacks")
-	snap := localSnap{}
+	snap := localSnap{Recent: s.recentRust()}
 	server := hint
 	// which server am I on? Steam knows the address; its query reply gives the server's Steam ID
 	var gi friendGameInfo
@@ -271,34 +271,44 @@ func (s *steamAPI) snapshot(hint uint64) localSnap {
 		if id == 0 || id == s.me {
 			continue
 		}
-		name := cstrAt(s.call("SteamAPI_ISteamFriends_GetFriendPersonaName", s.friends, uintptr(id)))
-		if name == "" || name == "[unknown]" {
-			name = ""
-			s.call("SteamAPI_ISteamFriends_RequestUserInformation", s.friends, uintptr(id), 1)
-		}
-		snap.Players = append(snap.Players, localPlayer{ID: strconv.FormatUint(id, 10), Name: name})
+		snap.Players = append(snap.Players, localPlayer{ID: strconv.FormatUint(id, 10), Name: s.name(id)})
 	}
 	if len(snap.Players) == 0 {
 		snap.State = "not-in-server"
-		snap.Note = "Steam has no player list for the server you're on"
+		snap.Note = "Steam has no full player list for this server"
 		if snap.ServerAddr == "" {
 			snap.Note += " (Steam doesn't show you on a server)"
 		}
-		// diagnostics: what the recently-played-with list has
-		c := int(int32(s.call("SteamAPI_ISteamFriends_GetCoplayFriendCount", s.friends)))
-		recent := 0
-		for i := 0; i < c; i++ {
-			id := s.call("SteamAPI_ISteamFriends_GetCoplayFriend", s.friends, uintptr(i))
-			if s.call("SteamAPI_ISteamFriends_GetFriendCoplayGame", s.friends, id) == 252490 &&
-				time.Since(time.Unix(int64(int32(s.call("SteamAPI_ISteamFriends_GetFriendCoplayTime", s.friends, id))), 0)) < time.Hour {
-				recent++
-			}
-		}
-		snap.Note += fmt.Sprintf("; recently played with: %d in the last hour", recent)
 		return snap
 	}
 	snap.State = "ok"
 	return snap
+}
+
+// name returns a player's Steam name, asking Steam for it if it isn't cached yet.
+func (s *steamAPI) name(id uint64) string {
+	name := cstrAt(s.call("SteamAPI_ISteamFriends_GetFriendPersonaName", s.friends, uintptr(id)))
+	if name == "" || name == "[unknown]" {
+		s.call("SteamAPI_ISteamFriends_RequestUserInformation", s.friends, uintptr(id), 1)
+		return ""
+	}
+	return name
+}
+
+// recentRust is Steam's "recently played with" list for Rust (the Steam overlay's Players
+// tab): up to 100 people, each with when you last played with them.
+func (s *steamAPI) recentRust() []localPlayer {
+	var out []localPlayer
+	c := int(int32(s.call("SteamAPI_ISteamFriends_GetCoplayFriendCount", s.friends)))
+	for i := 0; i < c && i < 1000; i++ {
+		id := uint64(s.call("SteamAPI_ISteamFriends_GetCoplayFriend", s.friends, uintptr(i)))
+		if id == 0 || id == s.me || s.call("SteamAPI_ISteamFriends_GetFriendCoplayGame", s.friends, uintptr(id)) != 252490 {
+			continue
+		}
+		at := int64(uint32(s.call("SteamAPI_ISteamFriends_GetFriendCoplayTime", s.friends, uintptr(id))))
+		out = append(out, localPlayer{ID: strconv.FormatUint(id, 10), Name: s.name(id), At: at})
+	}
+	return out
 }
 
 func cstring(b []byte) string {

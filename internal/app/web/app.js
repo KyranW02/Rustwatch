@@ -149,11 +149,16 @@ function renderOverview() {
     const cls = { window: "due", overdue: "late", active: "", upcoming: "", unknown: "muted" }[f.state] || "";
     return `<div class="next ${cls}" title="${esc(f.source)}">Next: ${esc(f.short)}${f.learned ? ' <span class="learned">learned</span>' : ""}</div>`;
   };
-  $("#ovEvents").innerHTML = ev ? EVENT_ROWS.map(([k, label]) => `<div class="ev ${ev.active?.includes(k) || fc[k]?.state === "window" ? "live" : ""}"><span class="k">${label}</span><span>${esc(ev[k])}${["cargo", "heli", "chinook", "vendor"].includes(k) ? nextLine(k) : ""}</span></div>`).join("") : `<div class="empty-note">Waiting for map data…</div>`;
+  $("#ovEvents").innerHTML = (markersCut() ? `<div class="muted" style="font-size:13px;margin-bottom:8px">Live event tracking isn't possible on this server: ${MARKERS_CUT_TEXT} The "Next" windows are estimates timed from the wipe or the last server restart.</div>` : "") + (ev ? EVENT_ROWS.map(([k, label]) => `<div class="ev ${ev.active?.includes(k) || fc[k]?.state === "window" ? "live" : ""}"><span class="k">${label}</span><span>${esc(ev[k])}${["cargo", "heli", "chinook", "vendor"].includes(k) ? nextLine(k) : ""}</span></div>`).join("") : `<div class="empty-note">Waiting for map data…</div>`);
   $("#ovTeam").innerHTML = (S.team || []).map(mateRow).join("") || `<div class="empty-note">You're not in a team.</div>`;
   $("#ovTimers").innerHTML = (S.timers || []).map((t) => `<div class="mate"><span class="dot afk"></span><span>${esc(t.message)} <small>in ${t.left}</small></span><button class="ghost small" onclick="act('/api/timers/cancel',{id:${t.id}})">Cancel</button></div>`).join("") || `<div class="muted" style="font-size:14px">No timers running. Team-chat command: !timer 10m message</div>`;
   $("#ovAlerts").innerHTML = (("Notification" in window && Notification.permission === "default") ? `<div class="al">${notifyStatus()}</div>` : "") + ((S.log || []).slice(-8).reverse().map(alertRow).join("") || `<div class="empty-note">Nothing yet.</div>`);
 }
+// Rust's 6 Aug 2026 update stopped sending shop, cargo, heli and vendor markers to Rust+.
+// Modded servers may still send them, so only say so when the server sends none.
+function markersCut() { const mi = S.markerInfo || {}; return !!(S.active && mi.at && !mi.vending); }
+const MARKERS_CUT_TEXT = "Rust's 6 August 2026 update stopped servers sending shops, cargo, patrol heli and the travelling vendor to Rust+, the system RustWatch and every other Rust+ app relies on.";
+
 function mateRow(m) {
   const cls = !m.isOnline ? "" : !m.isAlive ? "dead" : m.afk ? "afk" : "on";
   const sub = !m.isOnline ? (m.offlineFor ? `offline ${m.offlineFor}` : "offline") : !m.isAlive ? `dead ${m.deadFor || ""}` : m.afk ? `AFK ${m.afkFor}` : m.grid;
@@ -212,10 +217,10 @@ function renderShops() {
   const tracked = new Set(S.trackedVMs || []);
   const list = vms.filter((v) => !f || v.name.toLowerCase().includes(f) || (v.orders || []).some((o) => itemName(o.itemId).toLowerCase().includes(f)));
   if (S.active && !vms.length && (mi.at || mi.error)) {
-    $("#vendList").innerHTML = `<div class="emptybox"><b>The server isn't reporting any shops.</b>
-      <p>RustWatch only sees vending machines that Rust+ sends, the same ones the Rust+ phone app shows. If you can see shop icons on the in-game map (G) but not here, the server may be hiding them from Rust+ (some modded servers do). Shops also need their broadcast switch on.</p>
-      <p>${mi.error ? "The last request failed: " + esc(mi.error) + ". " : ""}Save a diagnostics file and send it over so the cause can be found.</p>
-      <button class="small" onclick="saveDiag()">Save diagnostics</button></div>`;
+    $("#vendList").innerHTML = mi.error && !mi.at ? `<div class="emptybox"><b>RustWatch couldn't get the map data.</b>
+      <p>The last request failed: ${esc(mi.error)}. Save a diagnostics file and send it over so the cause can be found.</p>
+      <button class="small" onclick="saveDiag()">Save diagnostics</button></div>` : `<div class="emptybox"><b>Rust no longer sends shops to Rust+.</b>
+      <p>${MARKERS_CUT_TEXT} So shop search, item alerts and shop tracking can't see anything on servers running the current version of Rust, and the Rust+ phone app doesn't show shops either. A modded server that still sends them will show up here automatically.</p></div>`;
     return;
   }
   $("#vendList").innerHTML = list.map((v) => `<div class="shop"><header><span class="g">${esc(v.grid.split(" ")[0])}</span><b>${esc(v.name)}</b>${v.outOfStock ? '<span class="pill">Out of stock</span>' : ""}<button class="${tracked.has(v.key) ? "" : "ghost"} small" onclick="trackVM('${v.key}',${!tracked.has(v.key)})">${tracked.has(v.key) ? "Tracking changes" : "Track changes"}</button></header>${(v.orders || []).map(orderLine).join("")}</div>`).join("") || `<div class="empty-note">${S.active ? "No vending machines on the map yet." : "Connect to a server first."}</div>`;
@@ -342,9 +347,13 @@ function renderPlayers() {
   const cnt = (T.online || []).length;
   $("#onlineCount").textContent = T.total && T.shown && T.shown < T.total - 2 ? `(${cnt} of ${T.total})` : `(${cnt})`;
   let note = "";
-  if (T.censored && !T.localMode) note += `<div class="emptybox" style="margin-bottom:10px"><b>This server hides real player names.</b><p>Rust's <code>server.censorplayerlist</code> setting (on by default) swaps everyone's name for a random stand-in in the public player list, so these aren't Steam names and tracking by name won't match here. BattleMetrics can still show real names when the server owner has given it admin access, but that feed isn't public.</p><p><b>Easiest fix: start Rust and join this server.</b> While you're in the game, RustWatch reads the real names from your Steam client, the same list as Shift+Tab → Players.</p><p><b>To follow someone while you're not in the game, track them by Steam profile:</b> paste their Steam profile link in “Track player”, or press <b>Link Steam</b> on someone you already track. ${T.steamOn ? "RustWatch then checks Steam every minute for which server they're on." : "This needs the free Steam Web API key in Settings → Kills."} It works as long as their Steam profile is public.</p></div>`;
+  if (T.censored && !T.localMode) note += `<div class="emptybox" style="margin-bottom:10px"><b>This server hides real player names.</b><p>Rust's <code>server.censorplayerlist</code> setting (on by default) swaps everyone's name for a random stand-in in the public player list, so these aren't Steam names and tracking by name won't match here. BattleMetrics can still show real names when the server owner has given it admin access, but that feed isn't public.</p><p><b>While you're in Rust on this server</b>, the <b>Seen in game</b> list below shows real Steam names of people you've recently played with (Steam's own list, up to 100). Track someone from there and they're followed by Steam profile from then on.</p><p><b>To follow someone while you're not in the game, track them by Steam profile:</b> paste their Steam profile link in “Track player”, or press <b>Link Steam</b> on someone you already track. ${T.steamOn ? "RustWatch then checks Steam every minute for which server they're on." : "This needs the free Steam Web API key in Settings → Kills."} It works as long as their Steam profile is public.</p></div>`;
   if (T.total && T.shown && T.shown < T.total - 2) note += `<div class="muted" style="font-size:13px;margin-bottom:8px">${T.localMode ? `Steam lists ${T.shown} of the server's ${T.total} players — Steam only knows players it has seen on the server, so a few may be missing.` : `The server only sent ${T.shown} of its ${T.total} players — its reply is cut short, so some players never appear here.`}</div>`;
   $("#onlineList").innerHTML = note + `<table><tbody>${on.map((p) => `<tr><td>${p.tracked ? `<span class="tag" style="background:${esc(p.color || "#e0ad3e")}">${esc(p.tag || "tracked")}</span>` : ""}${esc(p.name)}${p.id.startsWith("s:") ? ` <a class="muted" style="font-size:12px" href="https://steamcommunity.com/profiles/${esc(p.id.slice(2))}" target="_blank" rel="noopener">Steam</a>` : ""}</td><td class="num muted">${esc(p.onlineFor)}</td><td style="text-align:right">${p.tracked ? "" : `<button class="ghost small" onclick="quickTrack('${p.id}','${esc(p.name)}')">Track</button>`}</td></tr>`).join("")}</tbody></table>` + (on.length ? "" : `<div class="empty-note">${ok ? "No players match." : "Waiting for the player list…"}</div>`);
+  const rec = (T.recent || []).filter((p) => !f || p.name.toLowerCase().includes(f));
+  $("#recentBlock").hidden = !(T.recent || []).length;
+  $("#recentCount").textContent = T.recent && T.recent.length ? `(${T.recent.length}${T.recentAt ? ", read " + ago(T.recentAt) : ""})` : "";
+  $("#recentList").innerHTML = `<table><tbody>${rec.map((p) => `<tr><td>${p.tracked ? `<span class="tag" style="background:${esc(p.color || "#e0ad3e")}">${esc(p.tag || "tracked")}</span>` : ""}${esc(p.name)} <a class="muted" style="font-size:12px" href="https://steamcommunity.com/profiles/${esc(p.id)}" target="_blank" rel="noopener">Steam</a></td><td class="num muted">${p.ago ? esc(p.ago) + " ago" : ""}</td><td style="text-align:right">${p.tracked ? "" : `<button class="ghost small" onclick="quickTrack('s:${esc(p.id)}','${esc(p.name)}')">Track</button>`}</td></tr>`).join("")}</tbody></table>`;
   $("#activity").innerHTML = (T.activity || []).map((a) => `<div class="act"><span class="muted">${clock(a.time)}</span> <span class="${a.joined ? "j" : "l"}">${a.joined ? "joined" : "left"}</span> ${a.tag ? `<span class="tag" style="background:var(--event)">${esc(a.tag)}</span>` : ""}${esc(a.name)}</div>`).join("") || `<div class="empty-note">Joins and leaves appear here after the next update.</div>`;
 }
 $("#onlineFilter").addEventListener("input", renderPlayers);
@@ -685,8 +694,10 @@ class MapView {
   }
   worldPx(d) { const m = S.map; return (d / m.mapSize) * (m.width - 2 * m.oceanMargin) * this.scale; }
   legend(counts) {
-    const html = Object.keys(layers).map((k) => `<label><input type="checkbox" data-layer="${k}" ${layers[k] ? "checked" : ""}>${LAYER_LABEL[k]}${counts[k] != null ? ` <span class="muted">${counts[k]}</span>` : ""}</label>`).join("");
+    let html = Object.keys(layers).map((k) => `<label><input type="checkbox" data-layer="${k}" ${layers[k] ? "checked" : ""}>${LAYER_LABEL[k]}${counts[k] != null ? ` <span class="muted">${counts[k]}</span>` : ""}</label>`).join("");
     const lg = $(".legend", this.el);
+    const cut = markersCut() ? `<div class="muted" style="font-size:12px;max-width:220px">Shops, cargo, heli and vendor aren't sent to Rust+ since Rust's August 2026 update.</div>` : "";
+    html += cut;
     if (lg.dataset.html !== html) { lg.innerHTML = html; lg.dataset.html = html; }
   }
   draw() {

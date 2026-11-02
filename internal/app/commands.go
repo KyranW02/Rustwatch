@@ -100,8 +100,14 @@ func (a *App) Command(sender uint64, line string) string {
 		parts = append(parts, "Offline: "+listOr(off))
 		return strings.Join(parts, " | ")
 	case "cargo":
+		if a.markersCutLocked() {
+			return "Cargo can't be seen live (Rust stopped sending it to Rust+ in Aug 2026). " + a.nextLine("cargo")
+		}
 		return ev.CargoStatus() + " " + a.nextLine("cargo")
 	case "heli":
+		if a.markersCutLocked() {
+			return "Patrol heli can't be seen live (Rust stopped sending it to Rust+ in Aug 2026). " + a.nextLine("heli")
+		}
 		return ev.HeliStatus() + " " + a.nextLine("heli")
 	case "chinook", "ch47", "crate":
 		return ev.ChinookStatus() + " " + a.nextLine("chinook")
@@ -120,6 +126,9 @@ func (a *App) Command(sender uint64, line string) string {
 	case "bradley", "brad":
 		return ev.BradleyStatus()
 	case "vendor":
+		if a.markersCutLocked() {
+			return "The travelling vendor can't be seen live (Rust stopped sending it to Rust+ in Aug 2026). " + a.nextLine("vendor")
+		}
 		return ev.VendorStatus() + " " + a.nextLine("vendor")
 	case "events":
 		s := ev.Summary()
@@ -131,6 +140,9 @@ func (a *App) Command(sender uint64, line string) string {
 		it, ok := FindItem(args)
 		if !ok {
 			return "Unknown item: " + args
+		}
+		if a.markersCutLocked() {
+			return "Shops can't be searched: Rust stopped sending vending machines to Rust+ in its Aug 2026 update."
 		}
 		return vendingChatSummary(a.vending.search(it.ID, cmd == "buy"), it.ID, cmd == "buy", 5)
 	case "craft":
@@ -425,3 +437,7 @@ func (a *App) removeTimerLocked(id int) {
 	}
 	a.timers = out
 }
+
+// markersCutLocked: the server sends no shops to Rust+, as on every server since Rust's
+// 6 Aug 2026 update (modded servers may still send them). Caller holds a.mu.
+func (a *App) markersCutLocked() bool { return a.markerDiag.At != 0 && a.markerDiag.Vending == 0 }

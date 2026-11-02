@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"sort"
 	"strings"
+	"time"
 )
 
 // The Steam client on your PC knows who is on the game server you're connected to — it's the
@@ -15,6 +17,7 @@ import (
 type localPlayer struct {
 	ID   string // SteamID64
 	Name string // "" until Steam has the name
+	At   int64  // recently-played-with time (Unix), for Recent entries
 }
 
 type localSnap struct {
@@ -22,7 +25,8 @@ type localSnap struct {
 	Note       string // human explanation for anything but "ok"
 	ServerAddr string // ip:port of the server you're in, as Steam reports it
 	ServerName string
-	Players    []localPlayer
+	Players    []localPlayer // everyone on the server, when Steam has that list
+	Recent     []localPlayer // Steam's "recently played with" for Rust (max 100), with times
 }
 
 // localSteamReader is implemented by the Windows Steam client reader (and fakes in tests).
@@ -123,4 +127,107 @@ func (t *Tracker) localListLocked(sc *ServerConfig, ps []localPlayer, serverList
 		}
 	}
 	return cur
+}
+
+// recentUsable: the recently-played-with list is worth showing when Rust is running and
+// you're on the active server (or Steam doesn't say which server you're on).
+func (t *Tracker) recentUsable(snap localSnap, sa serverAddrs) bool {
+	if len(snap.Recent) == 0 || snap.State == "" || snap.State == "no-rust" || snap.State == "unavailable" {
+		return false
+	}
+	if snap.ServerAddr != "" {
+		sa.resolve(context.Background())
+		if h, _, err := net.SplitHostPort(snap.ServerAddr); err == nil && !sa.ips[net.ParseIP(h).String()] {
+			return false
+		}
+	}
+	return true
+}
+
+// storeRecentLocked keeps the latest recently-played-with list with names filled in, and links
+// players tracked by name to their Steam ID when the name matches. Caller holds a.mu.
+func (t *Tracker) storeRecentLocked(sc *ServerConfig, rs []localPlayer) {
+	t.recent, t.recentAt = nil, time.Now()
+	byName := map[string]string{}
+	for _, r := range rs {
+		if r.Name == "" {
+			r.Name = t.names[r.ID]
+		}
+		t.recent = append(t.recent, r)
+		if r.Name != "" {
+			byName[strings.ToLower(cleanName(r.Name))] = r.ID
+		}
+	}
+	changed := false
+	for i := range sc.Tracked {
+		tp := &sc.Tracked[i]
+		if tp.SteamID == "" && tp.Name != "" {
+			if id, ok := byName[strings.ToLower(strings.TrimSpace(tp.Name))]; ok {
+				tp.SteamID, changed = id, true
+			}
+		}
+	}
+	if changed {
+		t.a.saveLocked()
+	}
+}
+
+type RecentView struct {
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	At      int64  `json:"at"`
+	Ago     string `json:"ago"`
+	Tracked bool   `json:"tracked"`
+	Tag     string `json:"tag"`
+	Color   string `json:"color"`
+}
+
+func (t *Tracker) recentViewLocked(tmap map[string]*TrackedPlayer) []RecentView {
+	now := time.Now()
+	var out []RecentView
+	for _, r := range t.recent {
+		name := r.Name
+		if name == "" {
+			name = "Steam user " + r.ID[max(0, len(r.ID)-5):]
+		}
+		rv := RecentView{ID: r.ID, Name: name, At: r.At}
+		if r.At > 0 {
+			rv.Ago = fmtDur(now.Sub(time.Unix(r.At, 0)))
+		}
+		for _, tp := range t.a.srv.Tracked {
+			if tp.SteamID == r.ID {
+				rv.Tracked, rv.Tag, rv.Color = true, tp.Tag, tp.Color
+			}
+		}
+		out = append(out, rv)
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].At > out[j].At })
+	return out
+}
+
+// recentStatsLocked summarises the recently-played-with times, for diagnostics.
+func (t *Tracker) recentStatsLocked() string {
+	if len(t.recent) == 0 {
+		return "none"
+	}
+	now := time.Now().Unix()
+	var b5, b15, b60, named int
+	distinct := map[int64]bool{}
+	for _, r := range t.recent {
+		age := now - r.At
+		switch {
+		case age < 300:
+			b5++
+		case age < 900:
+			b15++
+		case age < 3600:
+			b60++
+		}
+		distinct[r.At] = true
+		if r.Name != "" {
+			named++
+		}
+	}
+	return fmt.Sprintf("%d players (%d named): %d in the last 5 min, %d 5–15 min, %d 15–60 min, %d older; %d distinct times; read %s ago",
+		len(t.recent), named, b5, b15, b60, len(t.recent)-b5-b15-b60, len(distinct), fmtDur(time.Since(t.recentAt)))
 }

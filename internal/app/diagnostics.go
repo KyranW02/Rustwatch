@@ -30,6 +30,7 @@ func (a *App) SaveDiagnostics() (string, error) {
 	tr := a.tracker
 	fmt.Fprintf(&b, "\nplayer tracker: source %s, status %q, %d online, shown %d of %d, censored %v\n", tr.source, tr.status, len(tr.online), tr.shown, tr.total, tr.censored)
 	fmt.Fprintf(&b, "in-game Steam list: in use %v, %q (server Steam ID %d)\n", tr.localMode, tr.localState, tr.serverSteamID)
+	fmt.Fprintf(&b, "Steam recently played with (Rust): %s\n", tr.recentStatsLocked())
 	fmt.Fprintf(&b, "\nmap markers: %d total, %d shops\n", d.Total, d.Vending)
 	var types []int
 	for t := range d.ByType {

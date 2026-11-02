@@ -37,20 +37,21 @@ type vm struct {
 }
 
 type Server struct {
-	mu          sync.Mutex
-	MapSize     uint32
-	members     []*member
-	vms         []*vm
-	switches    map[uint32]bool
-	alarms      map[uint32]bool
-	conns       map[*ws.Conn]bool
-	start       time.Time
-	chat        [][]byte
-	Events      bool // simulate cargo / heli / chinook
-	CensorNames bool // query port behaves like server.censorplayerlist
-	jpg         []byte
-	listener    net.Listener
-	Addr        string
+	mu              sync.Mutex
+	MapSize         uint32
+	members         []*member
+	vms             []*vm
+	switches        map[uint32]bool
+	alarms          map[uint32]bool
+	conns           map[*ws.Conn]bool
+	start           time.Time
+	chat            [][]byte
+	Events          bool // simulate cargo / heli / chinook
+	CensorNames     bool // query port behaves like server.censorplayerlist
+	TeamMarkersOnly bool // like Rust since Aug 2026: Rust+ gets player markers only
+	jpg             []byte
+	listener        net.Listener
+	Addr            string
 }
 
 func New() *Server {
@@ -388,6 +389,9 @@ func (s *Server) markers() *pb.Writer {
 			rot := float32(i*110 + int(time.Since(s.start).Seconds())*3)
 			add(uint32(100+i), 1, m.x, m.y, func(mm *pb.Writer) { mm.Uint(5, mid); mm.Float(6, rot) })
 		}
+	}
+	if s.TeamMarkersOnly {
+		return w
 	}
 	for _, v := range s.vms {
 		vv := v

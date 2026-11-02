@@ -57,6 +57,8 @@ type Tracker struct {
 	localState    string            // why the Steam client list is or isn't used
 	names         map[string]string // steamId -> Steam name cache
 	serverSteamID uint64            // the active server's Steam ID, from its query reply
+	recent        []localPlayer     // Steam's recently-played-with list (Rust), names filled in
+	recentAt      time.Time         // when recent was read
 }
 
 type OnlinePlayer struct {
@@ -254,6 +256,7 @@ func (t *Tracker) poll() {
 		t.censored, t.shown, t.total = false, 0, 0
 		t.steam, t.steamErr, t.herePorts, t.portChecked = map[string]steamPresence{}, "", map[int]bool{}, map[int]bool{}
 		t.localMode, t.localState, t.names, t.serverSteamID = false, "", map[string]string{}, 0
+		t.recent, t.recentAt = nil, time.Time{}
 	}
 	local, hint := t.local, t.serverSteamID
 	steamKey := a.cfg.Settings.SteamAPIKey
@@ -296,8 +299,14 @@ func (t *Tracker) poll() {
 	<-steamDone
 	<-localDone
 	useLocal, localState := t.judgeLocal(snap, sa, local != nil)
-	if useLocal {
-		t.fillNames(ctx, steamKey, snap.Players)
+	recentOK := t.recentUsable(snap, sa)
+	if useLocal || recentOK {
+		t.fillNames(ctx, steamKey, append(append([]localPlayer{}, snap.Players...), snap.Recent...))
+	}
+	if recentOK {
+		a.mu.Lock()
+		t.storeRecentLocked(sc, snap.Recent)
+		a.mu.Unlock()
 	}
 	if err != nil && pres == nil && !useLocal {
 		a.mu.Lock()
@@ -744,6 +753,8 @@ type TrackerView struct {
 	SteamOn    bool          `json:"steamOn"`
 	LocalMode  bool          `json:"localMode"`
 	LocalState string        `json:"localState"`
+	Recent     []RecentView  `json:"recent"`
+	RecentAt   int64         `json:"recentAt"`
 	SteamErr   string        `json:"steamErr"`
 	Shown      int           `json:"shown"`
 	Total      int           `json:"total"`
@@ -841,6 +852,10 @@ func (t *Tracker) viewLocked() TrackerView {
 		}
 		return strings.ToLower(v.Tracked[i].Name) < strings.ToLower(v.Tracked[j].Name)
 	})
+	v.Recent = t.recentViewLocked(tmap)
+	if !t.recentAt.IsZero() {
+		v.RecentAt = t.recentAt.Unix()
+	}
 	n := len(t.activity)
 	for i := n - 1; i >= 0 && i >= n-150; i-- {
 		v.Activity = append(v.Activity, t.activity[i])
