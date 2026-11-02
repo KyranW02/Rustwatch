@@ -120,6 +120,7 @@ function render() {
   if (!S) return;
   renderStrip();
   renderNav();
+  mapFileSync();
   const vids = [];
   (S.vending || []).forEach((v) => (v.orders || []).forEach((o) => vids.push(o.itemId, o.currencyId)));
   ensureNames(vids).then((ch) => ch && (maps.overview.draw(), maps.full.draw()));
@@ -753,8 +754,42 @@ $("#timerForm").addEventListener("submit", (e) => {
 /* ---------- map ---------- */
 const GRID = 146.25;
 const MARK = { 1: "Teammate", 2: "Explosion", 3: "Shop", 4: "Chinook", 5: "Cargo ship", 6: "Locked crate", 7: "Event area", 8: "Patrol heli", 9: "Travelling vendor" };
-const layers = { grid: true, monuments: true, team: true, trails: true, deaths: false, shops: true, events: true, pins: true, raid: true };
-const LAYER_LABEL = { grid: "Grid", monuments: "Monuments", team: "Team", trails: "Trails (1h)", deaths: "Team deaths", shops: "Shops", events: "Events", pins: "Map pins", raid: "Raid estimate" };
+const layers = { grid: true, monuments: true, team: true, trails: true, deaths: false, shops: true, events: true, pins: true, raid: true,
+  rocks: true, caves: true, tunnels: true, nobuild: false, spawns: false, biomes: false, cargo: false };
+const LAYER_LABEL = { grid: "Grid", monuments: "Monuments", team: "Team", trails: "Trails (1h)", deaths: "Team deaths", shops: "Shops", events: "Events", pins: "Map pins", raid: "Raid estimate",
+  rocks: "Big rocks", caves: "Caves", tunnels: "Train tunnels", nobuild: "No-build zones", spawns: "Beach spawns", biomes: "Biomes", cargo: "Cargo route (estimate)" };
+const FILE_LAYERS = ["rocks", "caves", "tunnels", "nobuild", "spawns", "biomes", "cargo"];
+try { const saved = JSON.parse(localStorage.getItem("rw.layers") || "{}"); for (const k in saved) if (k in layers) layers[k] = !!saved[k]; } catch (e) {}
+
+/* layers read from Rust's own map file for this server */
+let MF = null, mfVersion = -1, mfLoading = false;
+const mfImg = {};
+async function mapFileSync() {
+  const v = S.mapFile || {};
+  if (v.state !== "ok") { MF = null; mfVersion = v.version ?? -1; return; }
+  if (v.version === mfVersion || mfLoading) return;
+  mfLoading = true;
+  try {
+    MF = await api("/api/mapfile");
+    mfVersion = v.version;
+    for (const k in mfImg) delete mfImg[k];
+    maps.overview.draw(); maps.full.draw();
+  } catch (e) {}
+  mfLoading = false;
+}
+function overlayImg(name) {
+  if (!mfImg[name]) {
+    const im = new Image();
+    im.onload = () => { maps.overview.draw(); maps.full.draw(); };
+    im.src = `/api/mapfile/layer?name=${name}&v=${mfVersion}`;
+    mfImg[name] = im;
+  }
+  const im = mfImg[name];
+  return im.complete && im.naturalWidth ? im : null;
+}
+const ROCK_NAMES = ["God rock", "Anvil rock", "Arch rock", "3-wall rock", "Throne rock", "Other big rock"];
+function rockName(f) { return MF && MF.rockNames && MF.rockNames[f.model]; }
+window.nameRock = (model, name) => api("/api/mapfile/rockname", { model, name }).then(() => { if (MF) { MF.rockNames[model] = name; if (!name) delete MF.rockNames[model]; } maps.overview.draw(); maps.full.draw(); $("#tip").style.display = "none"; pinnedTip = null; toast(name ? `Model ${model.split("_")[1].toUpperCase()} is now “${name}”` : "Name cleared", "Applies to every map."); }).catch((e) => toast("Couldn't save that", e.message, "alarm"));
 const PIN_COLOURS = ["#e9d24a", "#3d8fe0", "#62c25a", "#d9483b", "#c25ad0", "#47c6c9"];
 const mapImg = new Image();
 let mapKey = "";
@@ -786,7 +821,7 @@ class MapView {
     this.c = $("canvas", el); this.ctx = this.c.getContext("2d");
     const [zi, zo, fit] = $$(".zoom button", el);
     zi.onclick = () => this.zoomAt(1.4); zo.onclick = () => this.zoomAt(1 / 1.4); fit.onclick = () => { this.scale = 0; this.draw(); };
-    $(".legend", el).addEventListener("change", (e) => { const k = e.target.dataset.layer; if (k) { layers[k] = e.target.checked; maps.overview.draw(); maps.full.draw(); } });
+    $(".legend", el).addEventListener("change", (e) => { const k = e.target.dataset.layer; if (k) { layers[k] = e.target.checked; try { localStorage.setItem("rw.layers", JSON.stringify(layers)); } catch (err) {} maps.overview.draw(); maps.full.draw(); } });
     el.addEventListener("wheel", (e) => { e.preventDefault(); const r = this.c.getBoundingClientRect(); this.zoomAt(e.deltaY < 0 ? 1.25 : 1 / 1.25, e.clientX - r.left, e.clientY - r.top); }, { passive: false });
     let drag = null, moved = false;
     el.addEventListener("pointerdown", (e) => { if (e.target !== this.c) return; drag = { x: e.clientX, y: e.clientY, ox: this.ox, oy: this.oy }; moved = false; el.classList.add("dragging"); this.c.setPointerCapture(e.pointerId); });
@@ -815,7 +850,10 @@ class MapView {
   }
   worldPx(d) { const m = S.map; return (d / m.mapSize) * (m.width - 2 * m.oceanMargin) * this.scale; }
   legend(counts) {
-    let html = Object.keys(layers).map((k) => `<label><input type="checkbox" data-layer="${k}" ${layers[k] ? "checked" : ""}>${LAYER_LABEL[k]}${counts[k] != null ? ` <span class="muted">${counts[k]}</span>` : ""}</label>`).join("");
+    const item = (k) => `<label><input type="checkbox" data-layer="${k}" ${layers[k] ? "checked" : ""}>${LAYER_LABEL[k]}${counts[k] != null ? ` <span class="muted">${counts[k]}</span>` : ""}</label>`;
+    const mf = S.mapFile || {};
+    let html = `<div class="lgroup"><span class="lhead">Live</span>${Object.keys(layers).filter((k) => !FILE_LAYERS.includes(k)).map(item).join("")}</div>`;
+    html += `<div class="lgroup"><span class="lhead" title="${esc(mf.file || "")}">Map file</span>${mf.state === "ok" ? FILE_LAYERS.map(item).join("") : `<span class="muted lnote">${esc(mf.state === "searching" ? "Looking for this server's map in your Rust folder…" : mf.note || "Not loaded")}</span>${mf.state === "missing" || mf.state === "error" ? ` <button class="link" onclick="api('/api/mapfile/rescan',{}).then(refresh)">Look again</button>` : ""}`}</div>`;
     const lg = $(".legend", this.el);
     const cut = markersCut() ? `<div class="muted" style="font-size:12px;max-width:220px">Shops, cargo, heli and vendor aren't sent to Rust+ since Rust's August 2026 update.</div>` : "";
     html += cut;
@@ -836,9 +874,14 @@ class MapView {
     if (mapKey !== key) { mapKey = key; mapImg.src = "/api/map.jpg?k=" + encodeURIComponent(key); mapImg.onload = () => { maps.overview.draw(); maps.full.draw(); }; }
     if (!this.scale) { this.scale = Math.min(r.width / m.width, r.height / m.height); this.ox = (r.width - m.width * this.scale) / 2; this.oy = (r.height - m.height * this.scale) / 2; }
     if (mapImg.complete && mapImg.naturalWidth) { ctx.imageSmoothingQuality = "high"; ctx.drawImage(mapImg, this.ox, this.oy, m.width * this.scale, m.height * this.scale); }
+    if (MF) {
+      const [ax, ay] = this.w2s(0, MF.size), [bx, by] = this.w2s(MF.size, 0);
+      for (const k of ["biomes", "nobuild", "spawns"]) if (layers[k]) { const im = overlayImg(k); if (im) { ctx.imageSmoothingEnabled = k !== "nobuild"; ctx.drawImage(im, ax, ay, bx - ax, by - ay); ctx.imageSmoothingEnabled = true; } }
+    }
     this.hits = [];
     const ms = corrected(m.mapSize);
     const counts = { shops: (S.vending || []).length, events: (S.markers || []).filter((k) => k.type !== 1).length, pins: (S.notes || []).length, deaths: (S.deaths || []).length };
+    if (MF) { counts.rocks = MF.features.filter((f) => f.kind === "rock").length; counts.caves = MF.features.filter((f) => f.kind === "cave").length; counts.tunnels = MF.features.filter((f) => f.kind === "tunnel").length; }
 
     if (layers.grid) {
       const n = Math.floor(ms / GRID);
@@ -859,6 +902,32 @@ class MapView {
         ctx.save(); ctx.translate(x, y - 9); ctx.rotate(Math.PI / 4);
         ctx.fillStyle = "rgba(239,231,214,.95)"; ctx.strokeStyle = "rgba(12,14,16,.9)"; ctx.lineWidth = 1.5; ctx.fillRect(-3.5, -3.5, 7, 7); ctx.strokeRect(-3.5, -3.5, 7, 7); ctx.restore();
         outlinedText(ctx, name, x, y + 4, "#f3ecdc", size);
+      }
+    }
+    if (MF && layers.cargo && MF.cargo && MF.cargo.length) {
+      ctx.save(); ctx.strokeStyle = "rgba(120,190,255,.85)"; ctx.lineWidth = 2; ctx.setLineDash([10, 7]);
+      ctx.beginPath(); MF.cargo.forEach((p, i) => { const [x, y] = this.w2s(p[0], p[1]); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }); ctx.stroke(); ctx.restore();
+      const p0 = MF.cargo[Math.floor(MF.cargo.length * 0.37)], [lx, ly] = this.w2s(p0[0], p0[1]);
+      outlinedText(ctx, "Cargo route (estimate)", lx, ly - 10, "#bfe0ff", 11);
+    }
+    if (MF) for (const f of MF.features) {
+      const k = { rock: "rocks", cave: "caves", tunnel: "tunnels", iceberg: "rocks" }[f.kind];
+      if (!layers[k]) continue;
+      const [x, y] = this.w2s(f.x, f.y);
+      if (f.kind === "rock" || f.kind === "iceberg") {
+        const named = f.kind === "rock" && rockName(f), r = named ? 6 : 4.5;
+        ctx.beginPath(); ctx.moveTo(x, y - r); ctx.lineTo(x + r, y + r * 0.8); ctx.lineTo(x - r, y + r * 0.8); ctx.closePath();
+        ctx.fillStyle = f.kind === "iceberg" ? "#cfefff" : named ? "#f1c47a" : "#c9c1b4"; ctx.fill(); ctx.strokeStyle = "#101214"; ctx.lineWidth = 1.2; ctx.stroke();
+        if (named && this.scale > 1.1) outlinedText(ctx, named, x, y + 13, "#f1c47a", 11);
+        this.hits.push({ x, y, r: 7, tip: () => rockTip(f) });
+      } else if (f.kind === "cave") {
+        badge(ctx, x, y, 7, "#4b3a2c", "#e4dcd1"); ctx.fillStyle = "#e4dcd1"; ctx.beginPath(); ctx.arc(x, y + 2, 3.5, Math.PI, 0); ctx.fill();
+        if (this.scale > 1.4) outlinedText(ctx, f.label, x, y + 15, "#e4dcd1", 11);
+        this.hits.push({ x, y, r: 9, tip: () => `<b>${esc(f.label)}</b> · ${esc(gridOf(f.x, f.y))}` });
+      } else if (f.kind === "tunnel") {
+        ctx.fillStyle = "#2c5d84"; ctx.strokeStyle = "#e4dcd1"; ctx.lineWidth = 1.5; ctx.fillRect(x - 6, y - 6, 12, 12); ctx.strokeRect(x - 6, y - 6, 12, 12);
+        ctx.fillStyle = "#e4dcd1"; ctx.fillRect(x - 3, y - 2, 6, 4);
+        this.hits.push({ x, y, r: 9, tip: () => `<b>Train tunnel entrance</b> · ${esc(gridOf(f.x, f.y))}` });
       }
     }
     if (layers.deaths) {
@@ -968,11 +1037,18 @@ class MapView {
   showTip(e, h, pinned) {
     const tip = $("#tip");
     if (!h) { tip.style.display = "none"; return; }
-    tip.innerHTML = h.tip() + (pinned ? `<div class="muted" style="font-size:11px;margin-top:4px">Click the map to close</div>` : "");
+    tip.innerHTML = h.tip(pinned) + (pinned ? `<div class="muted" style="font-size:11px;margin-top:4px">Click the map to close</div>` : "");
+    tip.classList.toggle("pinned", !!pinned);
     tip.style.display = "block";
     tip.style.left = Math.min(window.innerWidth - tip.offsetWidth - 10, e.clientX + 14) + "px";
     tip.style.top = Math.min(window.innerHeight - tip.offsetHeight - 10, e.clientY + 14) + "px";
   }
+}
+function rockTip(f) {
+  const model = f.model.split("_")[1].toUpperCase(), named = rockName(f);
+  return `<b>${esc(named || (f.kind === "iceberg" ? "Iceberg" : f.model.startsWith("arid") ? "Large desert rock" : "Large rock formation"))}</b> · ${esc(gridOf(f.x, f.y))}
+    ${f.kind === "rock" ? `<div class="muted">Model ${esc(model)}${f.model.startsWith("arid") ? " (desert)" : ""}${named ? "" : ". Rust doesn't label god rocks or anvils, so name this model once and every map shows it."}</div>
+    <div class="namerock">${ROCK_NAMES.map((n) => `<button type="button" class="${named === n ? "" : "ghost"} small" onclick="nameRock('${f.model}','${n}')">${n}</button>`).join("")}${named ? `<button type="button" class="link" onclick="nameRock('${f.model}','')">Clear</button>` : ""}</div>` : ""}`;
 }
 function gridOf(x, y) {
   const ms = corrected(S.map.mapSize), n = Math.floor(ms / GRID);

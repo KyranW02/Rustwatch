@@ -74,6 +74,7 @@ type Settings struct {
 	DiscordChannel     string                `json:"discordChannel"`
 	DiscordRelayChat   bool                  `json:"discordRelayChat"` // post team chat to the Discord channel
 	DiscordToTeam      bool                  `json:"discordToTeam"`    // post Discord messages into team chat
+	RockNames          map[string]string     `json:"rockNames"`        // rock model -> your name for it (god rock, anvil…)
 }
 
 func defaultSettings() Settings {
@@ -146,6 +147,7 @@ type ServerConfig struct {
 	PopLog      []PopPoint          `json:"popLog"`     // population every 10 minutes
 	DeathSpots  []DeathSpot         `json:"deathSpots"` // where teammates died this wipe
 	JoinLog     []Activity          `json:"joinLog"`    // who joined and left (for likely teams)
+	MapFile     string              `json:"mapFile"`    // Rust's cached map file for this server
 }
 
 type Config struct {

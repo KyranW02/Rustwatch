@@ -126,10 +126,11 @@ func rustPID() uint32 {
 var vdfPathRe = regexp.MustCompile(`"path"\s+"([^"]+)"`)
 
 // findRustSteamAPI finds steam_api64.dll in the Rust install, via Steam's library folders.
-func findRustSteamAPI() (string, error) {
+// rustRoots lists Rust install folders in every Steam library on this PC.
+func rustRoots() []string {
 	steam := regString(syscall.HKEY_CURRENT_USER, `Software\Valve\Steam`, "SteamPath")
 	if steam == "" {
-		return "", fmt.Errorf("couldn't find Steam on this PC")
+		return nil
 	}
 	steam = filepath.FromSlash(steam)
 	libs := []string{steam}
@@ -138,8 +139,27 @@ func findRustSteamAPI() (string, error) {
 			libs = append(libs, strings.ReplaceAll(m[1], `\\`, `\`))
 		}
 	}
+	var out []string
+	seen := map[string]bool{}
 	for _, lib := range libs {
 		root := filepath.Join(lib, "steamapps", "common", "Rust")
+		if seen[strings.ToLower(root)] {
+			continue
+		}
+		seen[strings.ToLower(root)] = true
+		if st, err := os.Stat(root); err == nil && st.IsDir() {
+			out = append(out, root)
+		}
+	}
+	return out
+}
+
+func findRustSteamAPI() (string, error) {
+	roots := rustRoots()
+	if len(roots) == 0 {
+		return "", fmt.Errorf("couldn't find Rust in your Steam libraries")
+	}
+	for _, root := range roots {
 		cands := []string{
 			filepath.Join(root, "RustClient_Data", "Plugins", "x86_64", "steam_api64.dll"),
 			filepath.Join(root, "RustClient_Data", "Plugins", "steam_api64.dll"),

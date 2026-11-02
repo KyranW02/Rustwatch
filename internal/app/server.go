@@ -95,6 +95,7 @@ type StateView struct {
 	Sounds      SoundView         `json:"sounds"`
 	Raid        RaidView          `json:"raid"`
 	Cameras     CamerasView       `json:"cameras"`
+	MapFile     MapFileView       `json:"mapFile"`
 	Automations []AutomationView  `json:"automations"`
 	Loot        []LootEntry       `json:"loot"`
 	Trails      []TrailView       `json:"trails"`
@@ -133,6 +134,7 @@ func (a *App) stateLocked() StateView {
 		v.Log = v.Log[len(v.Log)-200:]
 	}
 	v.Discord = a.discord.Status()
+	v.MapFile = a.maps.View()
 	v.ForcedWipe = NextForcedWipe(time.Now()).Unix()
 	v.Automations = []AutomationView{}
 	v.Loot, v.Trails, v.Deaths = []LootEntry{}, []TrailView{}, []DeathSpot{}

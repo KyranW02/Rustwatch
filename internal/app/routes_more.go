@@ -86,6 +86,31 @@ func (a *App) featureRoutes(mux *http.ServeMux, post func(string, func(*http.Req
 		return map[string]int{"switched": n}, err
 	})
 
+	mux.HandleFunc("GET /api/mapfile", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, a.maps.Data()) })
+	mux.HandleFunc("GET /api/mapfile/layer", func(w http.ResponseWriter, r *http.Request) {
+		b, err := a.maps.Overlay(r.URL.Query().Get("name"))
+		if err != nil {
+			http.Error(w, err.Error(), 404)
+			return
+		}
+		w.Header().Set("Content-Type", "image/png")
+		w.Header().Set("Cache-Control", "max-age=3600")
+		w.Write(b)
+	})
+	post("/api/mapfile/rescan", func(r *http.Request) (any, error) {
+		a.maps.Look(true)
+		return nil, nil
+	})
+	post("/api/mapfile/rockname", func(r *http.Request) (any, error) {
+		var b struct {
+			Model string `json:"model"`
+			Name  string `json:"name"`
+		}
+		if err := decode(r, &b); err != nil {
+			return nil, err
+		}
+		return nil, a.SetRockName(b.Model, b.Name)
+	})
 	mux.HandleFunc("GET /api/stats", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, a.Stats()) })
 	mux.HandleFunc("GET /api/raidcost", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, map[string]any{"targets": raidTargets, "sulfur": raidSulfur, "asOf": time.Date(2026, 9, 22, 0, 0, 0, 0, time.UTC).Format("2 January 2006")})

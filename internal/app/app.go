@@ -99,6 +99,7 @@ type App struct {
 	tracker *Tracker
 	sounds  *SoundWatch
 	cams    *Cameras
+	maps    *MapFiles
 	discord *DiscordBot
 	trails  map[uint64][]TrailPoint
 
@@ -142,6 +143,7 @@ func New(dir string) *App {
 	}
 	a.tracker = newTracker(a)
 	a.cams = newCameras(a)
+	a.maps = newMapFiles(a)
 	a.discord = newDiscordBot(a)
 	a.trails = map[uint64][]TrailPoint{}
 	a.sounds = newSoundWatch(a, dir, newGameAudio())
@@ -215,6 +217,7 @@ func (a *App) ticker() {
 			}
 		}
 		a.mu.Unlock()
+		a.maps.retry()
 		a.publish("update", nil)
 	}
 }
@@ -524,6 +527,7 @@ func (a *App) initSession(ctx context.Context, c *rustplus.Client) error {
 	}
 	a.refreshDevices(ctx, c)
 	a.fetchMarkers(ctx, c)
+	a.maps.Look(false)
 	a.tracker.poke()
 	select {
 	case a.statsPoke <- struct{}{}:

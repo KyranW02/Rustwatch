@@ -78,6 +78,14 @@ func main() {
 		stats, _ := net.Listen("tcp", "127.0.0.1:0")
 		go http.Serve(stats, fs.SteamStats())
 		a.DemoSetup("http://" + stats.Addr().String())
+		// RUSTWATCH_DEMO_MAP=path/to/a/Rust.map makes the demo server use that real world
+		if mf := os.Getenv("RUSTWATCH_DEMO_MAP"); mf != "" {
+			if err := fs.UseMapFile(mf); err != nil {
+				log.Println("demo map:", err)
+			} else if os.Getenv("RUSTWATCH_MAPS") == "" {
+				os.Setenv("RUSTWATCH_MAPS", filepath.Dir(mf))
+			}
+		}
 		qaddr, _ := fs.StartQuery("127.0.0.1:0")
 		fs.CensorNames = true                   // like most real servers: the public list has stand-in names…
 		a.DemoLocalSteam(fs.OnlineSteam, qaddr) // …but the Steam client knows who's really there

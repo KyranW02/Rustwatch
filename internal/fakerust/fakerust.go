@@ -55,6 +55,8 @@ type Server struct {
 	cams            map[string]*fakeCam
 	camSub          map[*ws.Conn]string
 	camOrder        []int16
+	monuments       []fakeMonument // from UseMapFile
+	mapW, margin    int
 }
 
 func New() *Server {
@@ -227,17 +229,21 @@ func (s *Server) onRequest(conn *ws.Conn, data []byte) {
 		resp.Message(7, w)
 	case 10: // map
 		w := &pb.Writer{}
-		w.Uint(1, 700)
-		w.Uint(2, 700)
+		mw0, margin := 700, 0
+		if s.mapW > 0 {
+			mw0, margin = s.mapW, s.margin
+		}
+		w.Uint(1, uint64(mw0))
+		w.Uint(2, uint64(mw0))
 		w.BytesField(3, s.jpg)
-		w.Int(4, 0)
-		mons := []struct {
-			t    string
-			x, y float32
-		}{{"outpost", 1750, 1750}, {"oil_rig_small", 3300, 1800}, {"large_oil_rig", 200, 1500}, {"launchsite", 2300, 900}, {"harbor_display_name", 1000, 450}, {"airfield_display_name", 1300, 2500}, {"bandit_camp", 900, 2600}}
+		w.Int(4, int64(margin))
+		mons := s.monuments
+		if mons == nil {
+			mons = []fakeMonument{{"outpost", 1750, 1750}, {"oil_rig_small", 3300, 1800}, {"large_oil_rig", 200, 1500}, {"launchsite", 2300, 900}, {"harbor_display_name", 1000, 450}, {"airfield_display_name", 1300, 2500}, {"bandit_camp", 900, 2600}}
+		}
 		for _, m := range mons {
 			mw := &pb.Writer{}
-			mw.String(1, m.t)
+			mw.String(1, m.token)
 			mw.Float(2, m.x)
 			mw.Float(3, m.y)
 			w.Message(5, mw)
