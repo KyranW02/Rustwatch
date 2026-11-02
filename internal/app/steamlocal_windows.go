@@ -104,20 +104,23 @@ func (w *winSteam) loop() {
 	}
 }
 
-func rustRunning() bool {
+func rustRunning() bool { return rustPID() != 0 }
+
+// rustPID finds RustClient.exe in the process list (by name only; the game is never opened).
+func rustPID() uint32 {
 	h, err := syscall.CreateToolhelp32Snapshot(syscall.TH32CS_SNAPPROCESS, 0)
 	if err != nil {
-		return false
+		return 0
 	}
 	defer syscall.CloseHandle(h)
 	var pe syscall.ProcessEntry32
 	pe.Size = uint32(unsafe.Sizeof(pe))
 	for err = syscall.Process32First(h, &pe); err == nil; err = syscall.Process32Next(h, &pe) {
 		if strings.EqualFold(syscall.UTF16ToString(pe.ExeFile[:]), "RustClient.exe") {
-			return true
+			return pe.ProcessID
 		}
 	}
-	return false
+	return 0
 }
 
 var vdfPathRe = regexp.MustCompile(`"path"\s+"([^"]+)"`)

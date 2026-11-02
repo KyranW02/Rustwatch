@@ -29,7 +29,7 @@ func TestMarkersCut(t *testing.T) {
 	if !cut {
 		t.Fatal("expected markers cut")
 	}
-	for cmd, want := range map[string]string{"buy ak": "Rust stopped sending vending machines", "cargo": "can't be seen live"} {
+	for cmd, want := range map[string]string{"buy ak": "Rust stopped sending vending machines", "cargo": "hasn't been heard yet"} {
 		got := a.Command(76561198000000001, cmd)
 		if !strings.Contains(got, want) {
 			t.Errorf("%s: %q", cmd, got)

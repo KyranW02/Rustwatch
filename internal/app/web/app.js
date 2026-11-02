@@ -107,7 +107,7 @@ function render() {
   (S.vending || []).forEach((v) => (v.orders || []).forEach((o) => vids.push(o.itemId, o.currencyId)));
   ensureNames(vids).then((ch) => ch && (maps.overview.draw(), maps.full.draw()));
   const r = { overview: renderOverview, map: () => maps.full.draw(), team: renderTeam, shops: renderShops, devices: renderDevices,
-    players: renderPlayers, chat: renderChat, commands: renderCommands, items: () => {}, alerts: renderAlerts, servers: renderServers, settings: renderSettings }[tab];
+    players: renderPlayers, chat: renderChat, commands: renderCommands, items: () => {}, sounds: renderSounds, alerts: renderAlerts, servers: renderServers, settings: renderSettings }[tab];
   r && r();
 }
 
@@ -133,7 +133,7 @@ function renderStrip() {
   $("#strip").innerHTML = h;
 }
 
-const EVENT_ROWS = [["cargo", "Cargo"], ["heli", "Heli"], ["chinook", "Chinook"], ["smallOil", "Small rig"], ["largeOil", "Large rig"], ["bradley", "Bradley"], ["vendor", "Vendor"]];
+const EVENT_ROWS = [["cargo", "Cargo"], ["heli", "Heli"], ["chinook", "Chinook"], ["smallOil", "Small rig"], ["largeOil", "Large rig"], ["bradley", "Bradley"], ["vendor", "Vendor"], ["excavator", "Excavator"], ["deepsea", "Deep Sea"]];
 function renderOverview() {
   maps.overview.draw();
   if (!S.active) {
@@ -149,7 +149,7 @@ function renderOverview() {
     const cls = { window: "due", overdue: "late", active: "", upcoming: "", unknown: "muted" }[f.state] || "";
     return `<div class="next ${cls}" title="${esc(f.source)}">Next: ${esc(f.short)}${f.learned ? ' <span class="learned">learned</span>' : ""}</div>`;
   };
-  $("#ovEvents").innerHTML = (markersCut() ? `<div class="muted" style="font-size:13px;margin-bottom:8px">Live event tracking isn't possible on this server: ${MARKERS_CUT_TEXT} The "Next" windows are estimates timed from the wipe or the last server restart.</div>` : "") + (ev ? EVENT_ROWS.map(([k, label]) => `<div class="ev ${ev.active?.includes(k) || fc[k]?.state === "window" ? "live" : ""}"><span class="k">${label}</span><span>${esc(ev[k])}${["cargo", "heli", "chinook", "vendor"].includes(k) ? nextLine(k) : ""}</span></div>`).join("") : `<div class="empty-note">Waiting for map data…</div>`);
+  $("#ovEvents").innerHTML = (markersCut() ? `<div class="muted" style="font-size:13px;margin-bottom:8px">Live event tracking isn't possible on this server: ${MARKERS_CUT_TEXT} RustWatch can hear events instead: teach it the sounds on the <a href="#" onclick="setTab('sounds');return false">Sounds</a> page. The "Next" windows are estimates timed from the wipe, restarts and anything heard.</div>` : "") + (ev ? EVENT_ROWS.map(([k, label]) => `<div class="ev ${ev.active?.includes(k) || fc[k]?.state === "window" ? "live" : ""}"><span class="k">${label}</span><span>${esc(ev[k])}${["cargo", "heli", "chinook", "vendor"].includes(k) ? nextLine(k) : ""}</span></div>`).join("") : `<div class="empty-note">Waiting for map data…</div>`);
   $("#ovTeam").innerHTML = (S.team || []).map(mateRow).join("") || `<div class="empty-note">You're not in a team.</div>`;
   $("#ovTimers").innerHTML = (S.timers || []).map((t) => `<div class="mate"><span class="dot afk"></span><span>${esc(t.message)} <small>in ${t.left}</small></span><button class="ghost small" onclick="act('/api/timers/cancel',{id:${t.id}})">Cancel</button></div>`).join("") || `<div class="muted" style="font-size:14px">No timers running. Team-chat command: !timer 10m message</div>`;
   $("#ovAlerts").innerHTML = (("Notification" in window && Notification.permission === "default") ? `<div class="al">${notifyStatus()}</div>` : "") + ((S.log || []).slice(-8).reverse().map(alertRow).join("") || `<div class="empty-note">Nothing yet.</div>`);
@@ -422,6 +422,8 @@ const COMMANDS = [
     ["loil", "", "Large oil rig only", ["large"]],
     ["bradley", "", "When Bradley was destroyed and its respawn estimate", ["brad"]],
     ["vendor", "", "Travelling vendor, next spawn"],
+    ["excavator", "", "When the giant excavator was last heard starting", ["exca"]],
+    ["deepsea", "", "When the Deep Sea cue was last heard", ["ds"]],
   ]],
   ["Shops and items", [
     ["buy", "<item>", "Cheapest shops selling an item, with grid", [], "buy ak"],
@@ -827,3 +829,89 @@ const maps = { overview: new MapView($("#mapOverview")), full: new MapView($("#m
 refresh();
 connectStream();
 setInterval(refresh, 15000);
+
+/* ---------- sounds ---------- */
+let teach = null; // {id, seconds, wave, from, to, event, result}
+function renderSounds() {
+  const V = S.sounds || {};
+  const on = !S.settings.soundOff;
+  const lvl = Math.max(0, Math.min(1, ((V.level ?? -90) + 60) / 60));
+  const ok = !!V.mode;
+  $("#sndStatus").innerHTML = `<div class="bm"><span class="pill ${ok ? "ok" : "warn"}" style="white-space:normal">${esc(V.state || "")}</span>
+    ${ok ? `<span class="meter" title="Game audio level"><i style="width:${(lvl * 100).toFixed(0)}%"></i></span>` : ""}
+    <label class="muted" style="display:flex;gap:6px;align-items:center;margin-left:auto"><input type="checkbox" ${on ? "checked" : ""} onchange="setSoundOn(this.checked)">Listen for event sounds</label></div>`;
+
+  const evs = V.events || [];
+  $("#sndEvents").innerHTML = evs.map((e) => {
+    const cues = (V.cues || []).filter((c) => c.event === e.key);
+    const close = (V.closest || {})[e.key];
+    return `<div class="sndev"><div><b>${esc(e.label)}</b> ${cues.length ? `<span class="pill ok">${cues.length} saved</span>` : `<span class="pill">not taught</span>`}
+      ${close > 0.05 ? `<span class="muted" style="font-size:12px" title="How close the latest audio came to this sound (1 = certain)"> closest lately ${close.toFixed(2)}</span>` : ""}</div>
+      <div class="muted" style="font-size:13px">${esc(e.hint)}</div>
+      ${cues.map((c) => `<div class="cue"><button class="ghost small" onclick="playCue('${esc(c.id)}')">Play</button><span class="muted">${c.seconds}s, saved ${c.created ? new Date(c.created * 1000).toLocaleString() : ""}</span><button class="danger small" onclick="delCue('${esc(c.id)}')">Delete</button></div>`).join("")}</div>`;
+  }).join("");
+  $("#sndHeard").innerHTML = (V.heard || []).map((h) => `<div class="al"><time>${clock(h.time)}</time><b>${esc(h.label)}</b> <span class="muted">${Math.round(h.match * 100)}% match</span></div>`).join("") || `<div class="empty-note">Nothing heard yet.</div>`;
+  if (!teach) $("#sndEditor").innerHTML = `<div class="empty-note">${ok ? "When you hear a cue in game, press the button above within 30 seconds." : "Start Rust to record game audio."}</div>`;
+}
+window.setSoundOn = (v) => { const s = { ...S.settings, soundOff: !v }; act("/api/settings", s); };
+window.playCue = (id) => new Audio(`/api/sounds/cue?id=${encodeURIComponent(id)}`).play();
+window.delCue = (id) => { if (confirm("Delete this saved sound?")) act("/api/sounds/delete", { id }); };
+
+$("#sndCapture").addEventListener("click", async () => {
+  try {
+    const r = await api("/api/sounds/capture", {});
+    teach = { ...r, from: Math.max(0, r.seconds - 8), to: Math.max(0, r.seconds - 3), event: teach?.event || "cargo", result: "" };
+    drawTeach();
+  } catch (e) { toast("Couldn't do that", e.message, "alarm"); }
+});
+
+function drawTeach() {
+  const t = teach;
+  const opts = (S.sounds.events || []).map((e) => `<option value="${e.key}" ${e.key === t.event ? "selected" : ""}>${esc(e.label)}</option>`).join("");
+  $("#sndEditor").innerHTML = `<p class="muted" style="font-size:13px;margin-top:0">Drag across the picture to select just the sound (cues show up as bright lines or a bright band). Play it back to check, then save it.</p>
+    <div class="sndclip" id="sndClip"><img src="/api/sounds/clip?img=1&id=${t.id}" alt="Spectrogram of the captured audio" draggable="false"><canvas></canvas></div>
+    <div class="timeline-legend"><span>${Math.round(t.seconds)} s ago</span><span id="sndSel"></span><span>now</span></div>
+    <div class="inline" style="margin-top:10px;flex-wrap:wrap"><button class="ghost" id="sndPlay">Play selection</button>
+      <select id="sndEvent" aria-label="Which event is this">${opts}</select>
+      <button class="ghost" id="sndTest">Check it</button><button id="sndSave">Save sound</button></div>
+    <div id="sndResult" class="muted" style="margin-top:8px">${t.result || ""}</div>`;
+  const box = $("#sndClip"), cv = $("canvas", box);
+  const paint = () => {
+    const r = box.getBoundingClientRect(), dpr = devicePixelRatio || 1;
+    cv.width = r.width * dpr; cv.height = r.height * dpr;
+    const c = cv.getContext("2d"); c.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const x0 = (t.from / t.seconds) * r.width, x1 = (t.to / t.seconds) * r.width;
+    c.fillStyle = "rgba(0,0,0,.55)"; c.fillRect(0, 0, x0, r.height); c.fillRect(x1, 0, r.width - x1, r.height);
+    c.strokeStyle = "#e0ad3e"; c.lineWidth = 2; c.strokeRect(x0, 1, x1 - x0, r.height - 2);
+    // waveform strip along the bottom
+    const strip = (34 / 194) * r.height, w = t.wave || [], h = strip - 6, base = r.height - strip / 2;
+    c.fillStyle = "rgba(255,255,255,.55)";
+    const peak = Math.max(0.05, ...w.map((p) => Math.max(-p[0], p[1])));
+    for (let i = 0; i < w.length; i++) { const x = (i / w.length) * r.width, a = (w[i][0] / peak) * h / 2, b = (w[i][1] / peak) * h / 2; c.fillRect(x, base - b, Math.max(1, r.width / w.length), Math.max(1, b - a)); }
+    $("#sndSel").textContent = `selected ${(t.to - t.from).toFixed(1)} s`;
+  };
+  $("img", box).onload = paint; paint();
+  let drag = null;
+  const at = (e) => { const r = box.getBoundingClientRect(); return Math.max(0, Math.min(t.seconds, ((e.clientX - r.left) / r.width) * t.seconds)); };
+  box.onpointerdown = (e) => { drag = at(e); t.from = t.to = drag; box.setPointerCapture(e.pointerId); paint(); };
+  box.onpointermove = (e) => { if (drag == null) return; const p = at(e); t.from = Math.min(drag, p); t.to = Math.max(drag, p); paint(); };
+  box.onpointerup = () => { drag = null; if (t.to - t.from < 0.25) { t.to = Math.min(t.seconds, t.from + 2); } paint(); };
+  $("#sndEvent").onchange = (e) => (t.event = e.target.value);
+  $("#sndPlay").onclick = () => new Audio(`/api/sounds/clip?id=${t.id}&from=${t.from}&to=${t.to}`).play();
+  $("#sndTest").onclick = async () => {
+    try {
+      const r = await api("/api/sounds/test", { id: t.id, from: t.from, to: t.to });
+      const parts = [];
+      parts.push(r.selfOK ? "Looks recognisable." : "This doesn't stand out enough to be recognised reliably. Try selecting just the loudest part of the sound.");
+      if (r.alreadyMatches && r.alreadyMatches.length) parts.push("RustWatch already hears this as: " + r.alreadyMatches.join(", ") + ".");
+      t.result = esc(parts.join(" ")); $("#sndResult").innerHTML = t.result;
+    } catch (e) { toast("Couldn't do that", e.message, "alarm"); }
+  };
+  $("#sndSave").onclick = async () => {
+    try {
+      await api("/api/sounds/save", { id: t.id, from: t.from, to: t.to, event: t.event });
+      toast("Sound saved", "RustWatch will listen for " + (S.sounds.events.find((e) => e.key === t.event)?.label || "it") + ".");
+      teach = null; refresh();
+    } catch (e) { toast("Couldn't do that", e.message, "alarm"); }
+  };
+}

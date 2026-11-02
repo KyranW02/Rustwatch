@@ -259,3 +259,13 @@ code { font-family: Consolas, "Cascadia Mono", monospace; font-size: 13px; backg
 
 .emptybox { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 14px 16px; max-width: 72ch; }
 .emptybox p { margin: 8px 0; color: var(--muted); }
+
+/* sounds */
+.meter { display: inline-block; width: 120px; height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; }
+.meter i { display: block; height: 100%; background: var(--ok); transition: width .3s; }
+.sndclip { position: relative; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; cursor: crosshair; touch-action: none; user-select: none; }
+.sndclip img { display: block; width: 100%; height: 194px; image-rendering: pixelated; }
+.sndclip canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+.sndev { padding: 10px 0; border-bottom: 1px solid var(--line); }
+.sndev .cue { display: flex; gap: 10px; align-items: center; margin-top: 6px; font-size: 13px; }
+.sndev .cue .danger { margin-left: auto; }

@@ -31,6 +31,11 @@ func (a *App) SaveDiagnostics() (string, error) {
 	fmt.Fprintf(&b, "\nplayer tracker: source %s, status %q, %d online, shown %d of %d, censored %v\n", tr.source, tr.status, len(tr.online), tr.shown, tr.total, tr.censored)
 	fmt.Fprintf(&b, "in-game Steam list: in use %v, %q (server Steam ID %d)\n", tr.localMode, tr.localState, tr.serverSteamID)
 	fmt.Fprintf(&b, "Steam recently played with (Rust): %s\n", tr.recentStatsLocked())
+	sv := a.sounds.View()
+	fmt.Fprintf(&b, "sound detection: %q (mode %q, level %.0f dBFS), %d saved sounds, %d heard\n", sv.State, sv.Mode, sv.Level, len(sv.Cues), len(sv.Heard))
+	for k, v := range sv.Closest {
+		fmt.Fprintf(&b, "  closest recent match %s: %.2f\n", k, v)
+	}
 	fmt.Fprintf(&b, "\nmap markers: %d total, %d shops\n", d.Total, d.Vending)
 	var types []int
 	for t := range d.ByType {

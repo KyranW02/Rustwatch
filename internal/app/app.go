@@ -96,6 +96,7 @@ type App struct {
 	connectedAt time.Time
 
 	tracker *Tracker
+	sounds  *SoundWatch
 
 	fcmStatus      string
 	fcmCancel      context.CancelFunc
@@ -136,6 +137,7 @@ func New(dir string) *App {
 		statsPoke:   make(chan struct{}, 1),
 	}
 	a.tracker = newTracker(a)
+	a.sounds = newSoundWatch(a, dir, newGameAudio())
 	go a.saver()
 	return a
 }
@@ -184,6 +186,7 @@ func (a *App) Start() {
 	go a.ticker()
 	go a.tracker.run()
 	go a.statsLoop()
+	a.sounds.Start()
 	go a.updateLoop()
 }
 

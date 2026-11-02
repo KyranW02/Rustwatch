@@ -17,6 +17,7 @@ var builtinCommands = map[string]bool{
 	"vendor": true, "buy": true, "sell": true, "craft": true, "recycle": true, "grecycle": true, "switch": true,
 	"switches": true, "promote": true, "leader": true, "tracked": true, "timer": true, "timers": true, "help": true,
 	"version": true, "notification": true, "next": true, "spawns": true, "online": true, "offline": true, "afk": true, "events": true, "upkeep": true,
+	"excavator": true, "exca": true, "deepsea": true, "ds": true,
 }
 
 func (a *App) runCommand(m rustplus.TeamMessage, line string) {
@@ -100,13 +101,13 @@ func (a *App) Command(sender uint64, line string) string {
 		parts = append(parts, "Offline: "+listOr(off))
 		return strings.Join(parts, " | ")
 	case "cargo":
-		if a.markersCutLocked() {
-			return "Cargo can't be seen live (Rust stopped sending it to Rust+ in Aug 2026). " + a.nextLine("cargo")
+		if a.markersCutLocked() && ev.CargoHeard.IsZero() {
+			return "Cargo isn't on Rust+ any more and hasn't been heard yet (teach its horn in RustWatch → Sounds). " + a.nextLine("cargo")
 		}
 		return ev.CargoStatus() + " " + a.nextLine("cargo")
 	case "heli":
-		if a.markersCutLocked() {
-			return "Patrol heli can't be seen live (Rust stopped sending it to Rust+ in Aug 2026). " + a.nextLine("heli")
+		if a.markersCutLocked() && ev.HeliDown.IsZero() {
+			return "Patrol heli isn't on Rust+ any more (Rust's Aug 2026 update). " + a.nextLine("heli")
 		}
 		return ev.HeliStatus() + " " + a.nextLine("heli")
 	case "chinook", "ch47", "crate":
@@ -126,13 +127,17 @@ func (a *App) Command(sender uint64, line string) string {
 	case "bradley", "brad":
 		return ev.BradleyStatus()
 	case "vendor":
-		if a.markersCutLocked() {
-			return "The travelling vendor can't be seen live (Rust stopped sending it to Rust+ in Aug 2026). " + a.nextLine("vendor")
+		if a.markersCutLocked() && ev.VendorHeard.IsZero() {
+			return "The travelling vendor isn't on Rust+ any more and hasn't been heard nearby yet. " + a.nextLine("vendor")
 		}
 		return ev.VendorStatus() + " " + a.nextLine("vendor")
+	case "excavator", "exca":
+		return ev.ExcavatorStatus()
+	case "deepsea", "ds":
+		return ev.DeepSeaStatus()
 	case "events":
 		s := ev.Summary()
-		return strings.Join([]string{s.Cargo, s.Heli, s.Chinook, s.Small, s.Large, s.Bradley, s.Vendor}, "\n")
+		return strings.Join([]string{s.Cargo, s.Heli, s.Chinook, s.Small, s.Large, s.Bradley, s.Vendor, s.Excavator, s.DeepSea}, "\n")
 	case "buy", "sell":
 		if args == "" {
 			return "Usage: " + a.cfg.Settings.Prefix + cmd + " <item>"

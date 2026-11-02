@@ -43,6 +43,12 @@ type EventEngine struct {
 	BradleyDown   time.Time
 	bradleyNoted  bool
 	VendorLeft    time.Time
+
+	// heard in game (sound detection), since Rust+ no longer sends these events
+	CargoHeard     time.Time
+	VendorHeard    time.Time
+	ExcavatorHeard time.Time
+	DeepSeaHeard   time.Time
 }
 
 type tracked struct {
@@ -301,11 +307,77 @@ func fmtDur(d time.Duration) string {
 	}
 }
 
+// Heard records an event recognised by its in-game sound.
+func (e *EventEngine) Heard(cue string) {
+	now := e.Now()
+	first := e.first
+	e.first = false // a sound is live news, never "already out at startup"
+	defer func() { e.first = first }()
+	switch cue {
+	case "cargo":
+		e.CargoHeard = now
+		e.spawned("cargo", now, false) // a sighting, but not necessarily the moment it spawned
+		e.emit("cargo", "Cargo ship heard", "Cargo Ship horn heard in game, cargo is out")
+	case "oil_small":
+		e.OilSmall, e.oilSmallDone = now, false
+		e.emit("oilrig", "Small Oil Rig triggered", fmt.Sprintf("Heard Small Oil Rig being called in. Crate unlocks in %d min.", int(e.LockedCrate.Minutes())))
+	case "oil_large":
+		e.OilLarge, e.oilLargeDone = now, false
+		e.emit("oilrig", "Large Oil Rig triggered", fmt.Sprintf("Heard Large Oil Rig being called in. Crate unlocks in %d min.", int(e.LockedCrate.Minutes())))
+	case "bradley":
+		e.BradleyDown, e.bradleyNoted = now, false
+		e.emit("bradley", "Bradley destroyed", fmt.Sprintf("Heard Bradley being destroyed. Respawns in ~%d min.", int(e.BradleyRespawn.Minutes())))
+	case "heli_down":
+		e.HeliDown, e.HeliDownWhere = now, "near you"
+		e.emit("heli", "Patrol heli shot down", "Heard the patrol heli go down nearby")
+	case "vendor":
+		if e.VendorHeard.IsZero() || now.Sub(e.VendorHeard) > 40*time.Minute {
+			e.spawned("vendor", now, false)
+		}
+		e.VendorHeard = now
+		e.emit("vendor", "Travelling vendor heard", "Heard the Travelling Vendor nearby")
+	case "excavator":
+		e.ExcavatorHeard = now
+		e.emit("excavator", "Giant excavator started", "Heard the giant excavator start up")
+	case "deepsea":
+		e.DeepSeaHeard = now
+		e.emit("deepsea", "Deep Sea", "Heard the Deep Sea cue")
+	}
+}
+
+// heardLine describes an event last known from its sound.
+func heardLine(name string, t, now time.Time, lasts time.Duration) string {
+	if t.IsZero() {
+		return ""
+	}
+	if now.Sub(t) < lasts {
+		return fmt.Sprintf(" Heard %s, probably still out (about %s left).", ago(t, now), fmtDur(lasts-now.Sub(t)))
+	}
+	return fmt.Sprintf(" Last heard %s.", ago(t, now))
+}
+
+func (e *EventEngine) ExcavatorStatus() string {
+	if e.ExcavatorHeard.IsZero() {
+		return "Giant excavator: not heard since RustWatch started."
+	}
+	return "Giant excavator: started " + ago(e.ExcavatorHeard, e.Now()) + "."
+}
+
+func (e *EventEngine) DeepSeaStatus() string {
+	if e.DeepSeaHeard.IsZero() {
+		return "Deep Sea: not heard since RustWatch started."
+	}
+	return "Deep Sea: heard " + ago(e.DeepSeaHeard, e.Now()) + "."
+}
+
 // Status lines used by chat commands and the dashboard.
 
 func (e *EventEngine) CargoStatus() string {
 	now := e.Now()
 	if len(e.cargo) == 0 {
+		if !e.CargoHeard.IsZero() && (e.CargoLeft.IsZero() || e.CargoHeard.After(e.CargoLeft)) {
+			return "Cargo Ship:" + heardLine("cargo", e.CargoHeard, now, e.CargoEgress+10*time.Minute)
+		}
 		return "Cargo Ship is not out. Last seen " + ago(e.CargoLeft, now) + "."
 	}
 	var parts []string
@@ -389,6 +461,9 @@ func (e *EventEngine) BradleyStatus() string {
 func (e *EventEngine) VendorStatus() string {
 	now := e.Now()
 	if len(e.vendors) == 0 {
+		if !e.VendorHeard.IsZero() && (e.VendorLeft.IsZero() || e.VendorHeard.After(e.VendorLeft)) {
+			return "Travelling Vendor:" + heardLine("vendor", e.VendorHeard, now, 30*time.Minute)
+		}
 		return "Travelling Vendor is not out. Last left " + ago(e.VendorLeft, now) + "."
 	}
 	var parts []string
@@ -400,29 +475,32 @@ func (e *EventEngine) VendorStatus() string {
 
 // Summary for the dashboard.
 type EventSummary struct {
-	Cargo   string   `json:"cargo"`
-	Heli    string   `json:"heli"`
-	Chinook string   `json:"chinook"`
-	Small   string   `json:"smallOil"`
-	Large   string   `json:"largeOil"`
-	Bradley string   `json:"bradley"`
-	Vendor  string   `json:"vendor"`
-	Active  []string `json:"active"`
+	Cargo     string   `json:"cargo"`
+	Heli      string   `json:"heli"`
+	Chinook   string   `json:"chinook"`
+	Small     string   `json:"smallOil"`
+	Large     string   `json:"largeOil"`
+	Bradley   string   `json:"bradley"`
+	Vendor    string   `json:"vendor"`
+	Excavator string   `json:"excavator"`
+	DeepSea   string   `json:"deepsea"`
+	Active    []string `json:"active"`
 }
 
 func (e *EventEngine) Summary() EventSummary {
 	s := EventSummary{Cargo: e.CargoStatus(), Heli: e.HeliStatus(), Chinook: e.ChinookStatus(),
-		Small: e.SmallOilStatus(), Large: e.LargeOilStatus(), Bradley: e.BradleyStatus(), Vendor: e.VendorStatus()}
-	if len(e.cargo) > 0 {
+		Small: e.SmallOilStatus(), Large: e.LargeOilStatus(), Bradley: e.BradleyStatus(), Vendor: e.VendorStatus(),
+		Excavator: e.ExcavatorStatus(), DeepSea: e.DeepSeaStatus()}
+	now := e.Now()
+	if len(e.cargo) > 0 || (!e.CargoHeard.IsZero() && now.Sub(e.CargoHeard) < e.CargoEgress+10*time.Minute) {
 		s.Active = append(s.Active, "cargo")
 	}
 	if len(e.heli) > 0 {
 		s.Active = append(s.Active, "heli")
 	}
-	if len(e.vendors) > 0 {
+	if len(e.vendors) > 0 || (!e.VendorHeard.IsZero() && now.Sub(e.VendorHeard) < 30*time.Minute) {
 		s.Active = append(s.Active, "vendor")
 	}
-	now := e.Now()
 	if !e.OilSmall.IsZero() && now.Sub(e.OilSmall) < e.LockedCrate {
 		s.Active = append(s.Active, "smallOil")
 	}

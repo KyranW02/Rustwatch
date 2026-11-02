@@ -19,6 +19,7 @@
   <button data-tab="chat">Team chat</button>
   <button data-tab="commands">Commands</button>
   <button data-tab="items">Items</button>
+  <button data-tab="sounds">Sounds</button>
   <button data-tab="alerts">Alerts <b id="alertCount"></b></button>
   <div class="rail-spacer"></div>
   <button data-tab="servers">Servers</button>
@@ -137,6 +138,27 @@
       <h1>Items</h1>
       <form class="inline" id="itemForm"><input name="q" placeholder="Item name, shortname or slang" autocomplete="off" aria-label="Item"><button>Look up</button></form>
       <div class="cols"><div id="itemResults"></div><div id="itemDetail"></div></div>
+    </div>
+  </section>
+
+  <section data-panel="sounds">
+    <div class="page">
+      <h1>Sounds</h1>
+      <div id="sndStatus"></div>
+      <p class="muted" style="max-width:75ch">Rust no longer sends cargo, heli, oil rigs or the vendor to Rust+, so RustWatch listens for them in the game instead. Teach it each sound once: when you hear it in game, come here, capture the last 30 seconds and mark the sound. After that RustWatch recognises it by itself, feeds the event timers and alerts you. Audio stays on your PC and is only kept in memory, except the clips you save.</p>
+      <div class="cols">
+        <div>
+          <h2>Teach a sound</h2>
+          <div class="inline" style="margin-bottom:10px"><button id="sndCapture">Capture the last 30 seconds</button></div>
+          <div id="sndEditor"></div>
+        </div>
+        <div>
+          <h2>Sounds RustWatch knows</h2>
+          <div id="sndEvents"></div>
+          <h2>Heard</h2>
+          <div id="sndHeard"></div>
+        </div>
+      </div>
     </div>
   </section>
 

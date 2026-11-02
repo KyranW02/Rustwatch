@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"rustwatch/internal/rustplus"
+	"rustwatch/internal/sound"
 )
 
 //go:embed web
@@ -89,6 +90,7 @@ type StateView struct {
 	Forecasts   []Forecast        `json:"forecasts"`
 	Update      UpdateInfo        `json:"update"`
 	MarkerInfo  MarkerDiag        `json:"markerInfo"`
+	Sounds      SoundView         `json:"sounds"`
 }
 
 func (a *App) stateLocked() StateView {
@@ -112,6 +114,7 @@ func (a *App) stateLocked() StateView {
 		v.AlertKinds = append(v.AlertKinds, map[string]any{"key": k.Key, "label": k.Label})
 	}
 	v.Tracker = a.tracker.viewLocked()
+	v.Sounds = a.sounds.View()
 	v.Update = a.update
 	v.Update.Current, v.Update.Repo = Version, a.updateRepoLocked()
 	v.Log = a.logs
@@ -599,6 +602,67 @@ func (a *App) Handler() http.Handler {
 			return
 		}
 		writeJSON(w, d)
+	})
+
+	// sound detection
+	post("/api/sounds/capture", func(r *http.Request) (any, error) {
+		id, x, err := a.sounds.Capture()
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{"id": id, "seconds": float64(len(x)) / sound.Rate, "wave": waveform(x, 900)}, nil
+	})
+	type cueSel struct {
+		ID       string
+		From, To float64
+		Event    string
+	}
+	post("/api/sounds/test", func(r *http.Request) (any, error) {
+		var b cueSel
+		if err := decode(r, &b); err != nil {
+			return nil, err
+		}
+		return a.sounds.TestCue(b.ID, b.From, b.To)
+	})
+	post("/api/sounds/save", func(r *http.Request) (any, error) {
+		var b cueSel
+		if err := decode(r, &b); err != nil {
+			return nil, err
+		}
+		return a.sounds.SaveCue(b.ID, b.From, b.To, b.Event)
+	})
+	post("/api/sounds/delete", func(r *http.Request) (any, error) {
+		var b cueSel
+		if err := decode(r, &b); err != nil {
+			return nil, err
+		}
+		return nil, a.sounds.DeleteCue(b.ID)
+	})
+	mux.HandleFunc("GET /api/sounds/clip", func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		from, _ := strconv.ParseFloat(q.Get("from"), 64)
+		to, _ := strconv.ParseFloat(q.Get("to"), 64)
+		x, err := a.sounds.clip(q.Get("id"), from, to)
+		if err != nil {
+			http.Error(w, err.Error(), 404)
+			return
+		}
+		w.Header().Set("Content-Type", "audio/wav")
+		if q.Get("img") != "" {
+			w.Header().Set("Content-Type", "image/png")
+			w.Write(spectrogramPNG(x))
+			return
+		}
+		w.Write(sound.EncodeWAV(x, sound.Rate))
+	})
+	mux.HandleFunc("GET /api/sounds/cue", func(w http.ResponseWriter, r *http.Request) {
+		b, err := a.sounds.cueAudio(r.URL.Query().Get("id"))
+		if err != nil {
+			http.Error(w, err.Error(), 404)
+			return
+		}
+		w.Header().Set("Content-Type", "audio/wav")
+		w.Write(b)
 	})
 
 	// player tracker

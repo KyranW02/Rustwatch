@@ -29,6 +29,8 @@ var alertKinds = []struct {
 	{"oilrig", "Oil rig triggered / crate unlocked", true, true},
 	{"bradley", "Bradley destroyed / respawn", true, true},
 	{"vendor", "Travelling vendor", true, true},
+	{"excavator", "Giant excavator started (heard)", true, true},
+	{"deepsea", "Deep Sea (heard)", true, true},
 	{"event_window", "Heli / cargo / chinook due any minute", true, false},
 	{"vending_new", "New vending machine", false, false},
 	{"vending_watch", "Watched item for sale", true, true},
@@ -62,6 +64,7 @@ type Settings struct {
 	EventWindows       map[string][2]float64 `json:"eventWindows"`  // default hours between spawns (min, max)
 	UpdateRepo         string                `json:"updateRepo"`    // GitHub owner/repo for updates ("" = built-in)
 	NoUpdateCheck      bool                  `json:"noUpdateCheck"` // turn off automatic update checks
+	SoundOff           bool                  `json:"soundOff"`      // turn off in-game sound detection
 }
 
 func defaultSettings() Settings {
