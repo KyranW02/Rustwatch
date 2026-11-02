@@ -85,6 +85,7 @@ type App struct {
 	teamState   map[uint64]*memberState
 	teamInit    bool
 	markers     []rustplus.Marker
+	markersAt   time.Time
 	events      *EventEngine
 	vending     *VendingState
 	devState    map[uint32]*deviceState
@@ -966,7 +967,7 @@ func (a *App) fetchMarkers(ctx context.Context, c *rustplus.Client) {
 func (a *App) updateMarkers(mk []rustplus.Marker) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	a.markers = mk
+	a.markers, a.markersAt = mk, time.Now()
 	a.events.Emit = a.alertLocked
 	a.events.OnSpawn = a.recordSpawnLocked
 	a.events.Update(mk)

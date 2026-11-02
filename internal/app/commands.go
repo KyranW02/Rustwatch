@@ -17,7 +17,7 @@ var builtinCommands = map[string]bool{
 	"vendor": true, "buy": true, "sell": true, "craft": true, "recycle": true, "grecycle": true, "switch": true,
 	"switches": true, "promote": true, "leader": true, "tracked": true, "timer": true, "timers": true, "help": true,
 	"version": true, "notification": true, "next": true, "spawns": true, "online": true, "offline": true, "afk": true, "events": true, "upkeep": true,
-	"excavator": true, "exca": true, "deepsea": true, "ds": true,
+	"excavator": true, "exca": true, "deepsea": true, "ds": true, "raid": true, "raids": true,
 }
 
 func (a *App) runCommand(m rustplus.TeamMessage, line string) {
@@ -135,6 +135,8 @@ func (a *App) Command(sender uint64, line string) string {
 		return ev.ExcavatorStatus()
 	case "deepsea", "ds":
 		return ev.DeepSeaStatus()
+	case "raid", "raids":
+		return a.sounds.raid.chatStatus()
 	case "events":
 		s := ev.Summary()
 		return strings.Join([]string{s.Cargo, s.Heli, s.Chinook, s.Small, s.Large, s.Bradley, s.Vendor, s.Excavator, s.DeepSea}, "\n")

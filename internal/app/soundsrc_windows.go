@@ -19,19 +19,31 @@ func (winAudio) Ready() (bool, string) {
 	return true, ""
 }
 
-func (winAudio) Run(stop <-chan struct{}, feed func([]float32), started func(string)) error {
+func (winAudio) Run(stop <-chan struct{}, feed func(l, r []float32), started func(string)) error {
 	pid := rustPID()
 	if pid == 0 {
 		return nil
 	}
-	var rs *sound.Resampler
+	var rl, rr *sound.Resampler
 	rate, ch := 0, 0
+	var bl, br []float32
 	return wasapi.Capture(stop, pid, true, func(s []float32, r, c int) {
-		if rs == nil || r != rate || c != ch {
-			rs, rate, ch = sound.NewResampler(r, c), r, c
+		if rl == nil || r != rate || c != ch {
+			rl, rr, rate, ch = sound.NewResampler(r, 1), sound.NewResampler(r, 1), r, c
 		}
-		if out := rs.Write(s); len(out) > 0 {
-			feed(out)
+		// front left / front right (the first two channels in every Windows layout)
+		bl, br = bl[:0], br[:0]
+		for i := 0; i+c <= len(s); i += c {
+			bl = append(bl, s[i])
+			if c > 1 {
+				br = append(br, s[i+1])
+			} else {
+				br = append(br, s[i])
+			}
+		}
+		ol, or := rl.Write(bl), rr.Write(br)
+		if n := min(len(ol), len(or)); n > 0 {
+			feed(ol[:n], or[:n])
 		}
 	}, func(m wasapi.Mode) { started(string(m)) })
 }

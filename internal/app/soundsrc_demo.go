@@ -14,7 +14,7 @@ type demoAudio struct{ start time.Time }
 
 func (demoAudio) Ready() (bool, string) { return true, "" }
 
-func (d demoAudio) Run(stop <-chan struct{}, feed func([]float32), started func(string)) error {
+func (d demoAudio) Run(stop <-chan struct{}, feed func(l, r []float32), started func(string)) error {
 	started("demo")
 	r := rand.New(rand.NewSource(1))
 	horn := sound.SynthHorn(2.8)
@@ -39,7 +39,7 @@ func (d demoAudio) Run(stop <-chan struct{}, feed func([]float32), started func(
 			chunk[i] = float32(math.Max(-1, math.Min(1, v)))
 			pos++
 		}
-		feed(chunk)
+		feed(chunk, chunk)
 	}
 }
 

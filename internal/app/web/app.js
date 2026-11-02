@@ -442,6 +442,7 @@ const COMMANDS = [
     ["promote", "<name>", "Make a teammate leader (leader only)", ["leader"], "promote bob", true],
     ["timer", "<time> <message>", "Post a message after 15s, 20m, 3h or 1h30m", [], "timer 10m bradley up", true],
     ["timers", "", "Running timers"],
+    ["raid", "", "Where the last raid was heard, as an estimated grid"],
   ]],
   ["Other", [
     ["help", "", "Post the command list in chat"],
@@ -634,8 +635,8 @@ $("#timerForm").addEventListener("submit", (e) => {
 /* ---------- map ---------- */
 const GRID = 146.25;
 const MARK = { 1: "Teammate", 2: "Explosion", 3: "Shop", 4: "Chinook", 5: "Cargo ship", 6: "Locked crate", 7: "Event area", 8: "Patrol heli", 9: "Travelling vendor" };
-const layers = { grid: true, monuments: true, team: true, shops: true, events: true, pins: true };
-const LAYER_LABEL = { grid: "Grid", monuments: "Monuments", team: "Team", shops: "Shops", events: "Events", pins: "Map pins" };
+const layers = { grid: true, monuments: true, team: true, shops: true, events: true, pins: true, raid: true };
+const LAYER_LABEL = { grid: "Grid", monuments: "Monuments", team: "Team", shops: "Shops", events: "Events", pins: "Map pins", raid: "Raid estimate" };
 const PIN_COLOURS = ["#e9d24a", "#3d8fe0", "#62c25a", "#d9483b", "#c25ad0", "#47c6c9"];
 const mapImg = new Image();
 let mapKey = "";
@@ -787,6 +788,18 @@ class MapView {
       ctx.fillStyle = "#fff"; ctx.strokeStyle = "#fff"; ctx.lineWidth = 1.4; GLYPH[spec[1]](ctx, x, y, rr - 1);
       this.hits.push({ x, y, r: rr + 2, tip: () => `<b>${MARK[mk.type] || "Marker"}</b> · ${esc(mk.grid)}` });
     }
+    const ra = S.raid && S.raid.active;
+    if (layers.raid && ra && ra.Located) {
+      const ring = (wx, wy, dashed, label) => {
+        const [x, y] = this.w2s(wx, wy), rad = Math.max(10, this.worldPx(150));
+        ctx.save(); ctx.setLineDash(dashed ? [5, 5] : []);
+        ctx.fillStyle = dashed ? "rgba(229,72,59,.06)" : "rgba(229,72,59,.16)"; ctx.strokeStyle = "#e5483b"; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(x, y, rad, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); ctx.restore();
+        outlinedText(ctx, label, x, y - rad - 6, "#ffb3ab", 12);
+      };
+      if (ra.Ambiguous) ring(ra.AltX, ra.AltY, true, "Raid? (or here)");
+      ring(ra.X, ra.Y, false, `Raid? ${ra.Count} explosions`);
+    }
     if (layers.team) for (const t of S.team || []) {
       const [x, y] = this.w2s(t.x, t.y);
       if (!t.isAlive) {
@@ -850,9 +863,21 @@ function renderSounds() {
       <div class="muted" style="font-size:13px">${esc(e.hint)}</div>
       ${cues.map((c) => `<div class="cue"><button class="ghost small" onclick="playCue('${esc(c.id)}')">Play</button><span class="muted">${c.seconds}s, saved ${c.created ? new Date(c.created * 1000).toLocaleString() : ""}</span><button class="danger small" onclick="delCue('${esc(c.id)}')">Delete</button></div>`).join("")}</div>`;
   }).join("");
+  renderRaid();
   $("#sndHeard").innerHTML = (V.heard || []).map((h) => `<div class="al"><time>${clock(h.time)}</time><b>${esc(h.label)}</b> <span class="muted">${Math.round(h.match * 100)}% match</span></div>`).join("") || `<div class="empty-note">Nothing heard yet.</div>`;
   if (!teach) $("#sndEditor").innerHTML = `<div class="empty-note">${ok ? "When you hear a cue in game, press the button above within 30 seconds." : "Start Rust to record game audio."}</div>`;
 }
+function renderRaid() {
+  const R = S.raid || {}, on = !S.settings.raidOff;
+  const ra = R.active;
+  let h = `<div class="bm"><span class="pill ${R.templates && on ? "ok" : "warn"}" style="white-space:normal">${!on ? "Off" : R.templates ? `Listening for explosions (${R.templates} sounds known)` : "No explosion sounds installed"}</span>
+    <label class="muted" style="display:flex;gap:6px;align-items:center;margin-left:auto"><input type="checkbox" ${on ? "checked" : ""} onchange="setRaidOn(this.checked)">Call out raids in team chat</label></div>
+    <p class="muted" style="max-width:75ch">When 4 or more explosions (C4, rockets, satchels, catapults…) agree on a spot within a minute, RustWatch posts an estimated grid to team chat and marks it on the map. Direction comes from your left/right audio and the way you're facing in Rust+, distance from which version of the sound the game played (close, distant or really distant), so treat it as a rough area. Normal stereo can't tell front from back: turning between blasts lets RustWatch work out which side it's on. Gunfire and grenades are ignored.</p>`;
+  if (ra) h += `<div class="emptybox" style="margin:10px 0"><b>${ra.Located ? "Current estimate on the map" : "Explosions heard, direction unknown"}</b><p>${ra.Count} explosions since ${clock(Date.parse(ra.Start) / 1000)}, last ${ago(Date.parse(ra.LastBlast) / 1000)}.${ra.Ambiguous ? " Front or back is still unsure, so both spots are shown." : ""}</p></div>`;
+  h += (R.blasts || []).map((b) => `<div class="al"><time>${clock(b.time)}</time><b>${esc(b.kind)}</b> <span class="muted">${esc(b.dist)} · ${esc(b.side)} of where you faced${b.bearings ? ` · bearing ${b.bearings[0]}° or ${b.bearings[1]}°` : ""} · ${Math.round(b.match * 100)}% match</span></div>`).join("") || `<div class="empty-note">No raid explosions heard yet.</div>`;
+  $("#raidBox").innerHTML = h;
+}
+window.setRaidOn = (v) => { const s = { ...S.settings, raidOff: !v }; act("/api/settings", s); };
 window.setSoundOn = (v) => { const s = { ...S.settings, soundOff: !v }; act("/api/settings", s); };
 window.playCue = (id) => new Audio(`/api/sounds/cue?id=${encodeURIComponent(id)}`).play();
 window.delCue = (id) => { if (confirm("Delete this saved sound?")) act("/api/sounds/delete", { id }); };

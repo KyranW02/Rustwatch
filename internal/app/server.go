@@ -92,6 +92,7 @@ type StateView struct {
 	Update      UpdateInfo        `json:"update"`
 	MarkerInfo  MarkerDiag        `json:"markerInfo"`
 	Sounds      SoundView         `json:"sounds"`
+	Raid        RaidView          `json:"raid"`
 }
 
 func (a *App) stateLocked() StateView {
@@ -116,6 +117,7 @@ func (a *App) stateLocked() StateView {
 	}
 	v.Tracker = a.tracker.viewLocked()
 	v.Sounds = a.sounds.View()
+	v.Raid = a.sounds.raid.view(a.cfg.Settings.RaidOff)
 	v.Update = a.update
 	v.Update.Current, v.Update.Repo = Version, a.updateRepoLocked()
 	v.Log = a.logs

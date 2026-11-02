@@ -54,7 +54,7 @@ func soundEventLabel(k string) string {
 // audioSource records game audio and hands it over as mono samples at sound.Rate.
 type audioSource interface {
 	Ready() (bool, string)
-	Run(stop <-chan struct{}, feed func([]float32), started func(mode string)) error
+	Run(stop <-chan struct{}, feed func(l, r []float32), started func(mode string)) error
 }
 
 const ringSeconds = 30
@@ -87,7 +87,10 @@ type SoundWatch struct {
 	dir string
 
 	mu       sync.Mutex
-	ring     []float32
+	ring     []float32 // mono, for event cues
+	ringL    []float32 // left and right, for working out where explosions come from
+	ringR    []float32
+	total    int64 // samples fed since start
 	pos      int
 	filled   bool
 	state    string // what the UI shows
@@ -100,12 +103,15 @@ type SoundWatch struct {
 	heard    []heardEntry
 	clips    map[string]pendingClip
 	lastBest map[string]float64 // best recent score per event, for the UI
+	raid     *RaidWatch
 }
 
 func newSoundWatch(a *App, dir string, src audioSource) *SoundWatch {
 	w := &SoundWatch{a: a, src: src, dir: filepath.Join(dir, "sounds"), ring: make([]float32, sound.Rate*ringSeconds),
+		ringL: make([]float32, sound.Rate*ringSeconds), ringR: make([]float32, sound.Rate*ringSeconds),
 		cool: map[string]time.Time{}, clips: map[string]pendingClip{}, lastBest: map[string]float64{}, state: "starting"}
 	w.loadCues()
+	w.raid = newRaidWatch(a, w.dir)
 	return w
 }
 
@@ -165,7 +171,7 @@ func (w *SoundWatch) captureLoop() {
 				}
 			}
 		}()
-		err := w.src.Run(stop, w.feed, func(mode string) {
+		err := w.src.Run(stop, w.feedStereo, func(mode string) {
 			switch mode {
 			case "process":
 				w.setState("Listening to Rust's audio only.", mode)
@@ -183,16 +189,43 @@ func (w *SoundWatch) captureLoop() {
 	}
 }
 
-func (w *SoundWatch) feed(mono []float32) {
+func (w *SoundWatch) feed(mono []float32) { w.feedStereo(mono, mono) }
+
+func (w *SoundWatch) feedStereo(l, r []float32) {
 	w.mu.Lock()
-	for _, v := range mono {
-		w.ring[w.pos] = v
+	n := min(len(l), len(r))
+	for i := 0; i < n; i++ {
+		w.ring[w.pos] = (l[i] + r[i]) / 2
+		w.ringL[w.pos], w.ringR[w.pos] = l[i], r[i]
 		w.pos++
 		if w.pos == len(w.ring) {
 			w.pos, w.filled = 0, true
 		}
 	}
+	w.total += int64(n)
 	w.mu.Unlock()
+}
+
+// lastStereo returns the most recent sec seconds of left and right audio and the running
+// sample count at its end.
+func (w *SoundWatch) lastStereo(sec float64) ([]float32, []float32, int64) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	n := int(sec * sound.Rate)
+	have := w.pos
+	if w.filled {
+		have = len(w.ring)
+	}
+	n = min(n, have)
+	l, r := make([]float32, n), make([]float32, n)
+	for i := 0; i < n; i++ {
+		j := w.pos - n + i
+		if j < 0 {
+			j += len(w.ring)
+		}
+		l[i], r[i] = w.ringL[j], w.ringR[j]
+	}
+	return l, r, w.total
 }
 
 // last returns the most recent sec seconds, oldest first.
@@ -234,6 +267,7 @@ func (w *SoundWatch) detectLoop() {
 				dirSig = sig
 			}
 		}
+		w.raid.tick(w)
 		lv := sound.RMS(w.last(0.5))
 		w.mu.Lock()
 		w.level = lv

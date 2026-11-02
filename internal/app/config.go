@@ -29,6 +29,7 @@ var alertKinds = []struct {
 	{"oilrig", "Oil rig triggered / crate unlocked", true, true},
 	{"bradley", "Bradley destroyed / respawn", true, true},
 	{"vendor", "Travelling vendor", true, true},
+	{"raid", "Raid heard (explosions, with estimated grid)", true, true},
 	{"excavator", "Giant excavator started (heard)", true, true},
 	{"deepsea", "Deep Sea alarm (heard)", true, true},
 	{"event_window", "Heli / cargo / chinook due any minute", true, false},
@@ -65,6 +66,7 @@ type Settings struct {
 	UpdateRepo         string                `json:"updateRepo"`    // GitHub owner/repo for updates ("" = built-in)
 	NoUpdateCheck      bool                  `json:"noUpdateCheck"` // turn off automatic update checks
 	SoundOff           bool                  `json:"soundOff"`      // turn off in-game sound detection
+	RaidOff            bool                  `json:"raidOff"`       // turn off raid (explosion) detection
 }
 
 func defaultSettings() Settings {
