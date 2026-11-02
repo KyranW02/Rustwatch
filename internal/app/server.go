@@ -41,6 +41,7 @@ type DeviceView struct {
 	HasProtection bool      `json:"hasProtection"`
 	UpkeepLeft    string    `json:"upkeepLeft"`
 	UpkeepSeconds int64     `json:"upkeepSeconds"`
+	UpkeepAt      int64     `json:"upkeepAt"`
 	Error         string    `json:"error"`
 	Updated       int64     `json:"updated"`
 }
@@ -93,6 +94,13 @@ type StateView struct {
 	MarkerInfo  MarkerDiag        `json:"markerInfo"`
 	Sounds      SoundView         `json:"sounds"`
 	Raid        RaidView          `json:"raid"`
+	Cameras     CamerasView       `json:"cameras"`
+	Automations []AutomationView  `json:"automations"`
+	Loot        []LootEntry       `json:"loot"`
+	Trails      []TrailView       `json:"trails"`
+	Deaths      []DeathSpot       `json:"deaths"`
+	Discord     string            `json:"discord"`
+	ForcedWipe  int64             `json:"forcedWipe"`
 }
 
 func (a *App) stateLocked() StateView {
@@ -124,9 +132,21 @@ func (a *App) stateLocked() StateView {
 	if len(v.Log) > 200 {
 		v.Log = v.Log[len(v.Log)-200:]
 	}
+	v.Discord = a.discord.Status()
+	v.ForcedWipe = NextForcedWipe(time.Now()).Unix()
+	v.Automations = []AutomationView{}
+	v.Loot, v.Trails, v.Deaths = []LootEntry{}, []TrailView{}, []DeathSpot{}
 	if a.srv == nil {
+		v.Cameras = a.cams.viewLocked(nil)
 		return v
 	}
+	v.Cameras = a.cams.viewLocked(a.srv.Cameras)
+	v.Automations = a.automationsViewLocked()
+	for i := len(a.srv.LootLog) - 1; i >= 0 && len(v.Loot) < 60; i-- {
+		v.Loot = append(v.Loot, a.srv.LootLog[i])
+	}
+	v.Trails = a.trailsViewLocked()
+	v.Deaths = append(v.Deaths, a.srv.DeathSpots...)
 	if !a.connectedAt.IsZero() {
 		v.ConnectedAt = a.connectedAt.Unix()
 	}
@@ -182,7 +202,7 @@ func (a *App) stateLocked() StateView {
 				dv.HasProtection = p.HasProtection
 				if p.HasProtection && p.ProtectionExpiry > 0 {
 					left := time.Until(time.Unix(int64(p.ProtectionExpiry), 0))
-					dv.UpkeepLeft, dv.UpkeepSeconds = fmtDur(left), int64(left.Seconds())
+					dv.UpkeepLeft, dv.UpkeepSeconds, dv.UpkeepAt = fmtDur(left), int64(left.Seconds()), int64(p.ProtectionExpiry)
 				}
 				for _, it := range p.Items {
 					dv.Items = append(dv.Items, ItemQty{ID: it.ItemID, Name: ItemName(it.ItemID), Short: ItemShort(it.ItemID), Quantity: it.Quantity, Blueprint: it.IsBlueprint})
@@ -343,6 +363,7 @@ func (a *App) Handler() http.Handler {
 		})
 	}
 	post("/api/steam/link", func(r *http.Request) (any, error) { return nil, a.StartSteamLink() })
+	a.featureRoutes(mux, post)
 	post("/api/steam/cancel", func(r *http.Request) (any, error) { a.CancelSteamLink(); return nil, nil })
 	post("/api/steam/unlink", func(r *http.Request) (any, error) { a.UnlinkSteam(); return nil, nil })
 
@@ -759,6 +780,13 @@ func (a *App) Handler() http.Handler {
 		if s.DiscordWebhook != "" && !strings.HasPrefix(s.DiscordWebhook, "https://") {
 			return nil, errors.New("Discord webhook must be an https:// URL")
 		}
+		s.DiscordChannel = strings.TrimSpace(s.DiscordChannel)
+		if s.DiscordChannel != "" {
+			if _, err := strconv.ParseUint(s.DiscordChannel, 10, 64); err != nil {
+				return nil, errors.New("the Discord channel ID is a long number: in Discord turn on Developer Mode, right-click the channel and Copy Channel ID")
+			}
+		}
+		s.DiscordBotToken = strings.TrimSpace(s.DiscordBotToken)
 		a.mu.Lock()
 		def := defaultSettings()
 		if s.LockedCrateMinutes <= 0 {
@@ -784,6 +812,7 @@ func (a *App) Handler() http.Handler {
 		}
 		for k, w := range s.EventWindows {
 			if w[0] <= 0 || w[1] < w[0] || w[1] > 72 {
+				a.mu.Unlock()
 				return nil, fmt.Errorf("event timing for %s must be a range like 2 to 4 hours", k)
 			}
 		}

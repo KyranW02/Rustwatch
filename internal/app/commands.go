@@ -18,6 +18,7 @@ var builtinCommands = map[string]bool{
 	"switches": true, "promote": true, "leader": true, "tracked": true, "timer": true, "timers": true, "help": true,
 	"version": true, "notification": true, "next": true, "spawns": true, "online": true, "offline": true, "afk": true, "events": true, "upkeep": true,
 	"excavator": true, "exca": true, "deepsea": true, "ds": true, "raid": true, "raids": true,
+	"raidmode": true, "rm": true, "raidcost": true, "rc": true, "loot": true,
 }
 
 func (a *App) runCommand(m rustplus.TeamMessage, line string) {
@@ -47,7 +48,7 @@ func (a *App) Command(sender uint64, line string) string {
 	switch cmd {
 	case "help":
 		p := a.cfg.Settings.Prefix
-		return fmt.Sprintf("Commands: %[1]spop %[1]stime %[1]swipe %[1]steam %[1]scargo %[1]sheli %[1]schinook %[1]soil %[1]sbradley %[1]svendor %[1]snext %[1]sbuy <item> %[1]ssell <item> %[1]scraft <item> %[1]srecycle <item> %[1]sgrecycle <item> %[1]sswitch <id> <name> %[1]sswitches %[1]s<switch> [on|off] %[1]spromote <name> %[1]stracked %[1]stimer <10m> <msg> %[1]supkeep %[1]sversion", p)
+		return fmt.Sprintf("Commands: %[1]spop %[1]stime %[1]swipe %[1]steam %[1]scargo %[1]sheli %[1]schinook %[1]soil %[1]sbradley %[1]svendor %[1]snext %[1]sbuy <item> %[1]ssell <item> %[1]scraft <item> %[1]srecycle <item> %[1]sgrecycle <item> %[1]sswitch <id> <name> %[1]sswitches %[1]s<switch> [on|off] %[1]spromote <name> %[1]stracked %[1]stimer <10m> <msg> %[1]supkeep %[1]sloot %[1]sraid %[1]sraidmode [off] %[1]sraidcost <wall> %[1]sversion", p)
 	case "version":
 		return "RustWatch " + Version
 	case "notification":
@@ -77,7 +78,7 @@ func (a *App) Command(sender uint64, line string) string {
 			return "Wipe time unknown."
 		}
 		w := time.Unix(int64(a.info.WipeTime), 0)
-		return fmt.Sprintf("Wiped %s ago (%s).", fmtDur(time.Since(w)), w.Format("Mon 2 Jan 15:04"))
+		return fmt.Sprintf("Wiped %s ago (%s).", fmtDur(time.Since(w)), w.Format("Mon 2 Jan 15:04")) + forcedWipeLine(time.Now())
 	case "team", "online", "offline", "afk":
 		tv := a.teamViewLocked()
 		if len(tv) == 0 {
@@ -230,7 +231,8 @@ func (a *App) Command(sender uint64, line string) string {
 				continue
 			}
 			if ds := a.devState[d.EntityID]; ds != nil && ds.Payload != nil && ds.Payload.HasProtection {
-				parts = append(parts, fmt.Sprintf("%s: %s", d.Name, fmtDur(time.Until(time.Unix(int64(ds.Payload.ProtectionExpiry), 0)))))
+				at := time.Unix(int64(ds.Payload.ProtectionExpiry), 0)
+				parts = append(parts, fmt.Sprintf("%s: %s (decays %s)", d.Name, fmtDur(time.Until(at)), at.Format("Mon 15:04")))
 			}
 		}
 		if len(parts) == 0 {
@@ -266,6 +268,21 @@ func (a *App) Command(sender uint64, line string) string {
 		return target.Name + " is now the team leader."
 	case "tracked":
 		return a.tracker.chatSummaryLocked()
+	case "raidcost", "rc":
+		return raidCostLine(args, a.cfg.Settings.Prefix)
+	case "loot":
+		return a.lootSummaryLocked()
+	case "raidmode", "rm":
+		on := !strings.EqualFold(strings.TrimSpace(args), "off")
+		why := "raid mode on"
+		if !on {
+			why = "raid mode off"
+		}
+		if n := a.fireLocked([]string{"manual"}, why+" (from chat)", !on); n == 0 {
+			return "Raid mode has no switches yet: set it up on the Devices page in RustWatch."
+		} else {
+			return fmt.Sprintf("Raid mode %s: switching %d device%s.", onoff(on), n, map[bool]string{true: "", false: "s"}[n == 1])
+		}
 	case "timer":
 		f := strings.Fields(args)
 		if len(f) < 2 {

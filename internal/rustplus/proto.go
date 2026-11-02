@@ -158,6 +158,7 @@ type Response struct {
 	Flag       *bool
 	Markers    []Marker
 	HasMarkers bool
+	CameraInfo *CameraInfo
 }
 
 type EntityChanged struct {
@@ -169,6 +170,7 @@ type Broadcast struct {
 	TeamChanged   *TeamInfo
 	TeamMessage   *TeamMessage
 	EntityChanged *EntityChanged
+	CameraRays    *CameraRays
 }
 
 // ---- decoding ----
@@ -477,6 +479,8 @@ func decodeResponse(b []byte) *Response {
 				}
 			})
 			r.Flag = &v
+		case 20:
+			r.CameraInfo = decodeCameraInfo(f.B)
 		case 13:
 			r.HasMarkers = true
 			pb.Each(f.B, func(g pb.Field) {
@@ -517,6 +521,8 @@ func decodeBroadcast(b []byte) *Broadcast {
 				}
 			})
 			bc.EntityChanged = ec
+		case 10:
+			bc.CameraRays = decodeCameraRays(f.B)
 		}
 	})
 	return bc

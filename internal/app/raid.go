@@ -167,10 +167,16 @@ func (r *RaidWatch) tick(w *SoundWatch) {
 	for len(r.blasts) > 0 && r.blasts[0].At.Before(cut) {
 		r.blasts = r.blasts[1:]
 	}
+	prev := r.cur
+	prevPosted := prev != nil && prev.Posted > 0
 	msgs := r.evaluate(now, size)
+	firstPost := r.cur != nil && r.cur.Posted > 0 && (r.cur != prev || !prevPosted)
 	r.mu.Unlock()
 	for _, m := range msgs {
 		r.post(m)
+	}
+	if firstPost {
+		r.a.fire([]string{"raid"}, "raid heard")
 	}
 	if len(fresh) > 0 {
 		r.a.publish("update", nil)

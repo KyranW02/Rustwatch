@@ -98,6 +98,7 @@ func main() {
 				{SteamID: "76561198000000077", Name: "Ghost", Tag: "Steam", Color: "#3e8ed0", Notify: true},
 				{SteamID: "76561198000000078", Name: "Hermit", Tag: "Steam", Color: "#3e8ed0"}},
 		})
+		a.DemoSeed()
 	}
 	a.Start()
 	if !*noWindow {

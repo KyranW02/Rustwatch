@@ -98,6 +98,9 @@ type App struct {
 
 	tracker *Tracker
 	sounds  *SoundWatch
+	cams    *Cameras
+	discord *DiscordBot
+	trails  map[uint64][]TrailPoint
 
 	fcmStatus      string
 	fcmCancel      context.CancelFunc
@@ -138,6 +141,9 @@ func New(dir string) *App {
 		statsPoke:   make(chan struct{}, 1),
 	}
 	a.tracker = newTracker(a)
+	a.cams = newCameras(a)
+	a.discord = newDiscordBot(a)
+	a.trails = map[uint64][]TrailPoint{}
 	a.sounds = newSoundWatch(a, dir, newGameAudio())
 	go a.saver()
 	return a
@@ -189,6 +195,7 @@ func (a *App) Start() {
 	go a.statsLoop()
 	a.sounds.Start()
 	go a.updateLoop()
+	go a.discord.run()
 }
 
 func (a *App) ticker() {
@@ -383,6 +390,8 @@ func (a *App) resetSessionLocked() {
 	a.chat = nil
 	a.sentRecent = map[string]time.Time{}
 	a.rateDay, a.rateNight = 0, 0
+	a.trails = map[uint64][]TrailPoint{}
+	go a.cams.Close()
 	a.applySettingsToEngineLocked()
 }
 
@@ -495,6 +504,7 @@ func (a *App) initSession(ctx context.Context, c *rustplus.Client) error {
 		a.saveLocked()
 	}
 	a.checkWipeLocked()
+	a.recordPopLocked(time.Now())
 	a.events.MapSize = info.MapSize
 	a.events.Monuments = m.Monuments
 	a.vending.mapSize, a.vending.monuments = info.MapSize, m.Monuments
@@ -548,6 +558,7 @@ func (a *App) pollLoop(ctx context.Context, c *rustplus.Client, discon chan erro
 				a.mu.Lock()
 				a.info = info
 				a.checkWipeLocked()
+				a.recordPopLocked(time.Now())
 				a.mu.Unlock()
 			}
 			if t, err := c.GetTime(ctx); err == nil {
@@ -578,8 +589,8 @@ func (a *App) refreshDevices(ctx context.Context, c *rustplus.Client) {
 		if err != nil {
 			ds.Error = err.Error()
 		} else {
-			p := ei.Payload
-			ds.Payload, ds.Error, ds.Updated = &p, "", time.Now()
+			d := d
+			a.setPayloadLocked(&d, ds, ei.Payload)
 			a.checkUpkeepLocked(d, ds)
 		}
 		a.mu.Unlock()
@@ -601,6 +612,12 @@ func (a *App) checkUpkeepLocked(d Device, ds *deviceState) {
 }
 
 func (a *App) onBroadcast(b *rustplus.Broadcast) {
+	if b.CameraRays != nil {
+		a.cams.onRays(b.CameraRays)
+		if b.TeamChanged == nil && b.TeamMessage == nil && b.EntityChanged == nil {
+			return // frames arrive many times a second; the Cameras page fetches pictures itself
+		}
+	}
 	if b.TeamChanged != nil {
 		a.updateTeam(b.TeamChanged)
 	}
@@ -624,14 +641,15 @@ func (a *App) onBroadcast(b *rustplus.Broadcast) {
 				}
 			}
 		}
-		if dev != nil && dev.Type == rustplus.EntityStorageMonitor && !p.HasValue && len(p.Items) == 0 && ds.Payload != nil {
+		if dev != nil && dev.Type == rustplus.EntityStorageMonitor && !p.HasValue && len(p.Items) == 0 && p.Capacity == 0 && ds.Payload != nil {
 			// partial update — keep previous contents
 		} else {
-			ds.Payload, ds.Error, ds.Updated = &p, "", time.Now()
+			a.setPayloadLocked(dev, ds, p)
 		}
 		if dev != nil && dev.Type == rustplus.EntityAlarm && p.Value && time.Since(ds.alarmTrig) > 10*time.Second {
 			ds.alarmTrig = time.Now()
 			a.alertLocked("alarm", "Alarm: "+dev.Name, fmt.Sprintf("Smart alarm '%s' was triggered!", dev.Name))
+			a.fireLocked([]string{fmt.Sprintf("alarm:%d", dev.EntityID), "alarm:any"}, "alarm '"+dev.Name+"' went off", false)
 		}
 		if dev != nil {
 			a.checkUpkeepLocked(*dev, ds)
@@ -782,6 +800,7 @@ func (a *App) updateTeam(t *rustplus.TeamInfo) {
 				a.alertLocked("team_offline", m.Name+" went offline", fmt.Sprintf("%s went offline%s", m.Name, dur))
 			}
 			if !m.Alive && p.Alive {
+				a.recordDeathLocked(m, p.X, p.Y, now)
 				a.srv.Deaths[strconv.FormatUint(m.SteamID, 10)]++
 				a.saveLocked()
 				a.alertLocked("team_death", m.Name+" died", fmt.Sprintf("%s died at %s", m.Name, Location(p.X, p.Y, mapSize, mons)))
@@ -789,6 +808,7 @@ func (a *App) updateTeam(t *rustplus.TeamInfo) {
 		} else if a.teamInit && !had {
 			a.alertLocked("team_online", m.Name+" joined the team", m.Name+" joined the team")
 		}
+		a.recordTrailLocked(m, now)
 		if math.Abs(float64(m.X-st.X)) > 0.5 || math.Abs(float64(m.Y-st.Y)) > 0.5 || !m.Alive {
 			if st.AFK && m.Online {
 				st.AFK = false
@@ -999,6 +1019,9 @@ func (a *App) onTeamMessage(m rustplus.TeamMessage) {
 	isCmd := st.ChatCommands && !line.Bot && !sentByUs && strings.HasPrefix(m.Message, st.Prefix)
 	a.mu.Unlock()
 	a.publish("update", nil)
+	if st.DiscordRelayChat && !strings.HasPrefix(m.Message, "[Discord]") && !strings.HasPrefix(m.Message, st.BotTag+" [Discord]") {
+		a.discord.Relay(fmt.Sprintf("**%s**: %s", m.Name, m.Message))
+	}
 	if isCmd {
 		go a.runCommand(m, strings.TrimPrefix(m.Message, st.Prefix))
 	}

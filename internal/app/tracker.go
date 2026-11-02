@@ -59,6 +59,9 @@ type Tracker struct {
 	serverSteamID uint64            // the active server's Steam ID, from its query reply
 	recent        []localPlayer     // Steam's recently-played-with list (Rust), names filled in
 	recentAt      time.Time         // when recent was read
+
+	groups   []LikelyGroup // cached likely teams
+	groupsAt time.Time
 }
 
 type OnlinePlayer struct {
@@ -250,7 +253,9 @@ func (t *Tracker) poll() {
 		source, key = "battlemetrics", "bm:"+sc.ID+":"+sc.BMServerID
 	}
 	if t.key != key {
-		t.key, t.source, t.online, t.first, t.activity = key, source, map[string]*OnlinePlayer{}, true, nil
+		t.key, t.source, t.online, t.first = key, source, map[string]*OnlinePlayer{}, true
+		t.activity = append([]Activity(nil), sc.JoinLog...) // joins and leaves are kept, for likely teams
+		t.groups = nil
 		t.serverID, t.serverName, t.queryAddr = sc.BMServerID, "", sc.QueryAddr
 		t.status, t.lastPoll = "loading the player list…", time.Time{}
 		t.censored, t.shown, t.total = false, 0, 0
@@ -592,6 +597,7 @@ func (t *Tracker) apply(sc *ServerConfig, cur map[string]seenPlayer) {
 			tracked[tp.BMID] = tp
 		}
 	}
+	tagsBefore, _, _ := t.tagOnline(tracked)
 	for id, sp := range cur {
 		p := t.online[id]
 		if p == nil {
@@ -656,6 +662,10 @@ func (t *Tracker) apply(sc *ServerConfig, cur map[string]seenPlayer) {
 			}
 		}
 	}
+	if !t.first {
+		t.checkTagsOfflineLocked(tagsBefore, tracked)
+	}
+	sc.JoinLog = t.activity
 	t.first = false
 	a.saveLocked()
 }
@@ -685,8 +695,8 @@ func (t *Tracker) addActivity(id, name string, joined bool, tp *TrackedPlayer) {
 		}
 	}
 	t.activity = append(t.activity, act)
-	if len(t.activity) > 400 {
-		t.activity = t.activity[len(t.activity)-400:]
+	if len(t.activity) > 3000 {
+		t.activity = t.activity[len(t.activity)-3000:]
 	}
 }
 
@@ -768,6 +778,7 @@ type TrackerView struct {
 	Online     []OnlineView  `json:"online"`
 	Tracked    []TrackedView `json:"tracked"`
 	Activity   []Activity    `json:"activity"`
+	Groups     []LikelyGroup `json:"groups"`
 }
 
 func playtime(ss []Session, since time.Time, now time.Time) time.Duration {
@@ -856,6 +867,11 @@ func (t *Tracker) viewLocked() TrackerView {
 	if !t.recentAt.IsZero() {
 		v.RecentAt = t.recentAt.Unix()
 	}
+	keys := map[string]bool{}
+	for k := range tmap {
+		keys[k] = true
+	}
+	v.Groups = t.likelyGroupsLocked(keys)
 	n := len(t.activity)
 	for i := n - 1; i >= 0 && i >= n-150; i-- {
 		v.Activity = append(v.Activity, t.activity[i])

@@ -33,6 +33,9 @@ var alertKinds = []struct {
 	{"excavator", "Giant excavator started (heard)", true, true},
 	{"deepsea", "Deep Sea alarm (heard)", true, true},
 	{"event_window", "Heli / cargo / chinook due any minute", true, false},
+	{"box_emptied", "Storage box emptied (storage monitor)", true, true},
+	{"clan_offline", "Every player with a tag went offline", true, false},
+	{"automation", "Automation or raid mode switched something", true, false},
 	{"vending_new", "New vending machine", false, false},
 	{"vending_watch", "Watched item for sale", true, true},
 	{"vending_tracked", "Tracked shop changed", true, false},
@@ -67,6 +70,10 @@ type Settings struct {
 	NoUpdateCheck      bool                  `json:"noUpdateCheck"` // turn off automatic update checks
 	SoundOff           bool                  `json:"soundOff"`      // turn off in-game sound detection
 	RaidOff            bool                  `json:"raidOff"`       // turn off raid (explosion) detection
+	DiscordBotToken    string                `json:"discordBotToken"`
+	DiscordChannel     string                `json:"discordChannel"`
+	DiscordRelayChat   bool                  `json:"discordRelayChat"` // post team chat to the Discord channel
+	DiscordToTeam      bool                  `json:"discordToTeam"`    // post Discord messages into team chat
 }
 
 func defaultSettings() Settings {
@@ -133,6 +140,12 @@ type ServerConfig struct {
 	TrackedVMs  []string            `json:"trackedVendingMachines"` // "x,y" keys
 	Tracked     []TrackedPlayer     `json:"trackedPlayers"`
 	Deaths      map[string]int      `json:"deaths"` // steamId -> count (this wipe)
+	Cameras     []CameraConfig      `json:"cameras"`
+	Automations []Automation        `json:"automations"`
+	LootLog     []LootEntry         `json:"lootLog"`    // storage monitor changes
+	PopLog      []PopPoint          `json:"popLog"`     // population every 10 minutes
+	DeathSpots  []DeathSpot         `json:"deathSpots"` // where teammates died this wipe
+	JoinLog     []Activity          `json:"joinLog"`    // who joined and left (for likely teams)
 }
 
 type Config struct {

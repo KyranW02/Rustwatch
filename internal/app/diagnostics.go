@@ -55,6 +55,16 @@ func (a *App) SaveDiagnostics() (string, error) {
 		fmt.Fprintf(&b, "shops RustWatch is tracking: %d\n", len(a.vending.machines))
 	}
 	fmt.Fprintf(&b, "team members: %d\n", len(a.teamViewLocked()))
+	if a.srv != nil {
+		cv := a.cams.viewLocked(a.srv.Cameras)
+		fmt.Fprintf(&b, "cameras saved: %d", len(cv.List))
+		if c := cv.Active; c != nil {
+			fmt.Fprintf(&b, ", open: %s (%dx%d, controls %d, %d frames, error %q)", c.ID, c.Width, c.Height, c.Controls, c.Frames, c.Error)
+		}
+		fmt.Fprintf(&b, "\nautomations: %d, loot log entries: %d, population samples: %d, death spots: %d, join log: %d\n",
+			len(a.srv.Automations), len(a.srv.LootLog), len(a.srv.PopLog), len(a.srv.DeathSpots), len(a.srv.JoinLog))
+	}
+	fmt.Fprintf(&b, "discord bot: %s\n", a.discord.Status())
 	raw := d.raw
 	a.mu.Unlock()
 

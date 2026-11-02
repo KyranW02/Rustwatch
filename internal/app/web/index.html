@@ -39,6 +39,9 @@
     <symbol id="i-switch" viewBox="0 0 20 20"><path d="M10 2v7M5.5 5a6.5 6.5 0 109 0"/></symbol>
     <symbol id="i-alarm" viewBox="0 0 20 20"><path d="M4 15V10a6 6 0 0112 0v5M2.5 15h15v2.5h-15zM10 1.5v1.5M3 4l1 1M17 4l-1 1"/></symbol>
     <symbol id="i-box" viewBox="0 0 20 20"><path d="M2 6h16v11H2zM2 6l2-3.5h12L18 6M7.5 10h5"/></symbol>
+    <symbol id="i-camera" viewBox="0 0 20 20"><path d="M2 6h11v8H2zM13 8.5l5-2.5v8l-5-2.5"/></symbol>
+    <symbol id="i-stats" viewBox="0 0 20 20"><path d="M2.5 17.5h15M4.5 14V9M8.5 14V5M12.5 14v-4M16.5 14V3"/></symbol>
+    <symbol id="i-sulfur" viewBox="0 0 20 20"><path d="M10 2l6.5 4v8L10 18l-6.5-4V6z"/><path d="M7 11.5c.5 1.2 1.6 1.8 3 1.8 1.6 0 2.6-.8 2.6-1.9 0-2.4-5.4-1.4-5.4-3.9 0-1 1-1.8 2.5-1.8 1.2 0 2.1.5 2.6 1.4"/></symbol>
   </defs>
 </svg>
 
@@ -49,6 +52,7 @@
   <button data-tab="map"><kbd>2</kbd><svg><use href="#i-map"/></svg><span>Map</span><em data-badge="map"></em></button>
   <button data-tab="team"><kbd>3</kbd><svg><use href="#i-team"/></svg><span>Team</span><em data-badge="team"></em></button>
   <button data-tab="chat"><kbd>4</kbd><svg><use href="#i-chat"/></svg><span>Team chat</span><em data-badge="chat"></em></button>
+  <button data-tab="server"><kbd></kbd><svg><use href="#i-stats"/></svg><span>Server stats</span><em data-badge="server"></em></button>
   <div class="navgroup">Intel</div>
   <button data-tab="players"><kbd>5</kbd><svg><use href="#i-players"/></svg><span>Players</span><em data-badge="players"></em></button>
   <button data-tab="sounds"><kbd>6</kbd><svg><use href="#i-sounds"/></svg><span title="Sounds and raid detection">Sounds</span><em data-badge="sounds"></em></button>
@@ -56,9 +60,11 @@
   <button data-tab="alerts"><kbd>8</kbd><svg><use href="#i-alerts"/></svg><span>Alerts</span><em id="alertCount" class="hot"></em></button>
   <div class="navgroup">Base</div>
   <button data-tab="devices"><kbd>9</kbd><svg><use href="#i-devices"/></svg><span>Devices</span><em data-badge="devices"></em></button>
+  <button data-tab="cameras"><kbd></kbd><svg><use href="#i-camera"/></svg><span>Cameras</span><em data-badge="cameras"></em></button>
   <div class="navgroup">Reference</div>
   <button data-tab="commands"><kbd>0</kbd><svg><use href="#i-commands"/></svg><span>Commands</span></button>
   <button data-tab="items"><kbd></kbd><svg><use href="#i-items"/></svg><span>Items</span></button>
+  <button data-tab="raidcost"><kbd></kbd><svg><use href="#i-sulfur"/></svg><span>Raid costs</span></button>
   <div class="rail-spacer"></div>
   <button data-tab="servers"><kbd></kbd><svg><use href="#i-servers"/></svg><span>Servers</span><em data-badge="servers"></em></button>
   <button data-tab="settings"><kbd></kbd><svg><use href="#i-settings"/></svg><span>Settings</span><em data-badge="settings"></em></button>
@@ -128,6 +134,21 @@
     <div class="page">
       <header class="ph"><div><h1>Smart devices</h1><p>Look at a smart switch, alarm or storage monitor in game, hold <kbd>E</kbd> and choose Pair. It appears here by itself. Give a switch a chat command to toggle it from team chat.</p></div><div class="ph-side" id="devSummary"></div></header>
       <div id="devices"></div>
+      <div class="cols" style="margin-top:16px">
+        <div class="box"><h2>Automations &amp; raid mode <span class="hmeta" id="autoCount"></span></h2><div class="pb">
+          <p class="muted small" style="margin-top:0">Switch things on or off by themselves when an alarm goes off or a raid is heard, or all at once with raid mode (the button, or <code>!raidmode</code> / <code>!raidmode off</code> in team chat).</p>
+          <div class="inline" id="raidModeBar"><button type="button" class="danger" onclick="raidMode(true)">Start raid mode</button><button type="button" class="ghost" onclick="raidMode(false)">End raid mode</button></div>
+          <div id="autoList"></div>
+          <form class="autoform" id="autoForm">
+            <label>When<select name="trigger" aria-label="When"></select></label>
+            <label>Turn<select name="switch" aria-label="Switch"></select></label>
+            <label>To<select name="on" aria-label="On or off"><option value="1">On</option><option value="0">Off</option></select></label>
+            <label>Back after<span class="withunit"><input name="revert" type="number" min="0" max="1440" value="0" aria-label="Turn back after minutes"><span>min</span></span></label>
+            <button>Add rule</button>
+          </form>
+        </div></div>
+        <div class="box"><h2>Loot log <span class="hmeta">storage monitors</span></h2><div class="pb flush" id="lootLog"></div></div>
+      </div>
       <details class="addbox"><summary>Add a device by entity ID</summary>
         <form class="inline" id="devForm"><input name="id" placeholder="Entity ID" size="10"><input name="name" placeholder="Name"><input name="cmd" placeholder="Chat command (switches)" size="14"><button>Add device</button></form>
       </details>
@@ -161,6 +182,16 @@
           </div></div>
           <div class="box"><h2>Joins and leaves</h2><div class="pb"><div id="activity" class="scroll short"></div></div></div>
         </div>
+      </div>
+      <div class="cols">
+        <div class="box"><h2>When they play <span class="hmeta">last 14 days</span></h2><div class="pb">
+          <div class="inline"><select id="heatWho" aria-label="Player or tag"></select><span class="muted small" id="heatNote"></span></div>
+          <div id="heatmap"></div>
+        </div></div>
+        <div class="box"><h2>Likely teams <span class="hmeta" id="groupCount"></span></h2><div class="pb">
+          <p class="muted small" style="margin-top:0">Players who keep joining or leaving within seconds of each other, from the join and leave log. Three or more times together counts. It fills in as RustWatch runs.</p>
+          <div id="groupList"></div>
+        </div></div>
       </div>
     </div>
   </section>
@@ -212,6 +243,51 @@
     </div>
   </section>
 
+  <section data-panel="server">
+    <div class="page">
+      <header class="ph"><div><h1>Server stats</h1><p>Population over the last week, the busiest and quietest times to play, and when the next wipe is.</p></div><div class="ph-side" id="statSummary"></div></header>
+      <div class="box"><h2>Population <span class="hmeta" id="popRange"></span></h2><div class="pb"><div id="popChart" class="chart"></div></div></div>
+      <div class="cols">
+        <div class="box"><h2>Average players by hour <span class="hmeta">your time</span></h2><div class="pb"><div id="hourChart" class="chart"></div><p class="muted small" id="hourNote"></p></div></div>
+        <div class="box"><h2>Wipes</h2><div class="pb" id="wipeBox"></div></div>
+      </div>
+    </div>
+  </section>
+
+  <section data-panel="cameras">
+    <div class="page">
+      <header class="ph"><div><h1>Cameras</h1><p>Watch your base's CCTV, PTZ cameras, turrets and drones through Rust+. Give the camera an ID at a computer station in game and add it here. Rust+ only streams cameras while you're <b>not</b> on the server.</p></div><div class="ph-side" id="camSummary"></div></header>
+      <div class="camwrap">
+        <div class="box camview"><h2 id="camTitle">No camera open</h2><div class="pb flush">
+          <div class="camscreen" id="camScreen" tabindex="0" aria-label="Camera picture. Drag to look around, WASD to move a drone."><img id="camImg" alt=""><div class="camover" id="camOver"></div><div class="crosshair" id="camCross" hidden></div></div>
+          <div class="camctl" id="camCtl"></div>
+        </div></div>
+        <div>
+          <div class="box"><h2>Saved cameras <span class="hmeta" id="camCount"></span></h2><div class="pb flush" id="camList"></div></div>
+          <div class="box"><h2>Add a camera</h2><div class="pb">
+            <form class="inline" id="camForm"><input name="id" placeholder="Camera ID, e.g. BASECAM1" aria-label="Camera ID" autocomplete="off"><input name="name" placeholder="Name (optional)" aria-label="Name"><button>Add camera</button></form>
+            <p class="muted small" style="margin:0">IDs are case-sensitive. In game, open a computer station, add the camera's ID there and use the same ID here. Turrets need the ID set on the turret first.</p>
+          </div></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section data-panel="raidcost">
+    <div class="page">
+      <header class="ph"><div><h1>Raid costs</h1><p>Explosives needed for each wall, door and deployable, and what a whole raid costs in sulfur. Vanilla numbers from full health, every charge landing.</p></div><div class="ph-side" id="rcAsOf"></div></header>
+      <div class="cols">
+        <div class="box"><h2>Plan a raid</h2><div class="pb">
+          <p class="muted small" style="margin-top:0">Add what's in the way and how many of each. In team chat: <code>!raidcost armored door 2</code>.</p>
+          <div id="rcPlan"></div>
+          <div class="inline" style="margin-top:10px"><select id="rcAdd" aria-label="Add a wall or door"></select><button type="button" class="ghost" id="rcAddBtn">Add</button><button type="button" class="ghost" id="rcClear">Clear</button></div>
+          <div id="rcTotals"></div>
+        </div></div>
+        <div class="box"><h2>Every target</h2><div class="pb flush" id="rcTable"></div></div>
+      </div>
+    </div>
+  </section>
+
   <section data-panel="alerts">
     <div class="page">
       <header class="ph"><div><h1>Alerts</h1><p>Everything RustWatch has told you about, newest first. Choose where each kind goes in Settings.</p></div><div class="ph-side"><select id="alertFilter" aria-label="Filter"><option value="">Everything</option></select><button id="clearLog" class="ghost">Clear list</button></div></header>
@@ -248,5 +324,6 @@
 <div id="tip" class="tip" role="tooltip"></div>
 <div id="toasts" class="toasts" aria-live="polite"></div>
 <script src="app.js"></script>
+<script src="features.js"></script>
 </body>
 </html>

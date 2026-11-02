@@ -124,7 +124,8 @@ function render() {
   (S.vending || []).forEach((v) => (v.orders || []).forEach((o) => vids.push(o.itemId, o.currencyId)));
   ensureNames(vids).then((ch) => ch && (maps.overview.draw(), maps.full.draw()));
   const r = { overview: renderOverview, map: () => maps.full.draw(), team: renderTeam, shops: renderShops, devices: renderDevices,
-    players: renderPlayers, chat: renderChat, commands: renderCommands, items: () => {}, sounds: renderSounds, alerts: renderAlerts, servers: renderServers, settings: renderSettings }[tab];
+    players: renderPlayers, chat: renderChat, commands: renderCommands, items: () => {}, sounds: renderSounds, alerts: renderAlerts, servers: renderServers, settings: renderSettings,
+    server: () => window.renderServerStats?.(), cameras: () => window.renderCameras?.(), raidcost: () => window.renderRaidCost?.() }[tab];
   r && r();
 }
 
@@ -176,6 +177,9 @@ function renderNav() {
   if (chatSeen < 0 || tab === "chat") chatSeen = c;
   set("chat", c > chatSeen ? String(c - chatSeen) : "", "warn");
   set("servers", S.active ? "" : "Pair", "warn");
+  const cam = S.cameras && S.cameras.active;
+  set("cameras", cam ? (cam.error ? "Error" : cam.players && cam.players.length ? "Player" : "Live") : (S.cameras && S.cameras.list.length ? String(S.cameras.list.length) : ""), cam ? (cam.error || (cam.players && cam.players.length) ? "bad" : "ok") : "");
+  set("server", S.forcedWipe && S.forcedWipe - Date.now() / 1000 < 86400 * 2 ? "Wipe soon" : "", "warn");
   set("settings", S.update && S.update.available ? "Update" : "", "warn");
 }
 
@@ -332,6 +336,8 @@ function renderDevices() {
   if (focus) return; // don't clobber the field being edited
   $("#devices").innerHTML = `<div class="devgrid">${devs.map(devCard).join("")}</div>`;
 }
+const _renderDevices = renderDevices;
+renderDevices = function () { _renderDevices(); window.renderDeviceExtras?.(); };
 function fmtSecs(s) { const d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600), m = Math.floor((s % 3600) / 60); return d ? `${d}d ${h}h` : h ? `${h}h ${m}m` : `${m}m`; }
 function devCard(d) {
   const kind = { 1: "Smart switch", 2: "Smart alarm", 3: "Storage monitor" }[d.type] || "Device";
@@ -353,7 +359,7 @@ function devCard(d) {
       const it = d.items[i];
       slots.push(it ? `<div title="${esc(it.name)}${it.blueprint ? " blueprint" : ""}: ${it.quantity.toLocaleString()}">${icon(it.short, it.name) || `<em>${esc(it.name)}</em>`}<span>${it.quantity > 1 ? "x" + short(it.quantity) : ""}</span></div>` : `<div class="empty"></div>`);
     }
-    body = (d.hasProtection ? `<div class="upkeep ${low ? "low" : ""}"><b>${d.upkeepLeft || "No upkeep"}</b><span>${d.upkeepLeft ? "until decay" : ""}</span></div><div class="upbar"><i style="width:${Math.min(100, ((d.upkeepSeconds || 0) / (3 * 86400)) * 100)}%"></i></div>` : "") +
+    body = (d.hasProtection ? `<div class="upkeep ${low ? "low" : ""}"><b>${d.upkeepLeft || "No upkeep"}</b><span>${d.upkeepLeft ? "until decay" : ""}</span>${d.upkeepAt ? `<span class="at">decays ${new Date(d.upkeepAt * 1000).toLocaleString([], { weekday: "short", hour: "2-digit", minute: "2-digit" })}</span>` : ""}</div><div class="upbar"><i style="width:${Math.min(100, ((d.upkeepSeconds || 0) / (3 * 86400)) * 100)}%"></i></div>` : "") +
       `<div class="inv">${slots.join("")}</div><div class="meta" style="margin-top:6px">${d.items.length} of ${cap} slots used</div>`;
   }
   return `<div class="dev ${cls}"><header><span class="devi">${svg(ic)}</span><div><h3>${esc(d.name)}</h3><div class="meta">${kind} · #${d.entityId}${d.updated ? " · updated " + ago(d.updated) : ""}</div></div>${err}</header><div class="body">${body}</div>
@@ -440,6 +446,8 @@ function renderPlayers() {
   $("#activity").innerHTML = (T.activity || []).map((a) => `<div class="act"><time>${clock(a.time)}</time><span class="${a.joined ? "j" : "l"}">${a.joined ? "Joined" : "Left"}</span><span>${a.tag ? `<span class="tag" style="background:var(--amber)">${esc(a.tag)}</span>` : ""}${esc(a.name)}</span></div>`).join("") || `<div class="empty-note">Joins and leaves appear here after the next update.</div>`;
 }
 $("#onlineFilter").addEventListener("input", renderPlayers);
+const _renderPlayers = renderPlayers;
+renderPlayers = function () { _renderPlayers(); window.renderPlayerExtras?.(); };
 $("#trackForm").addEventListener("submit", (e) => {
   e.preventDefault();
   const who = e.target.who.value.trim();
@@ -491,7 +499,7 @@ const COMMANDS = [
   ["Server", [
     ["pop", "", "Players online, max players and queue"],
     ["time", "", "In-game time and how long until sunset or sunrise"],
-    ["wipe", "", "How long ago the server wiped"],
+    ["wipe", "", "How long ago the server wiped, and when the next forced wipe is"],
     ["team", "", "Who's online, AFK and offline", ["online", "offline", "afk"]],
   ]],
   ["World events", [
@@ -513,12 +521,14 @@ const COMMANDS = [
     ["sell", "<item>", "Shops that take an item as payment", [], "sell scrap"],
     ["craft", "<item>", "Crafting cost and workbench level", [], "craft ak"],
     ["recycle", "<item>", "What a safe-zone recycler gives back", [], "recycle roadsign jacket"],
+    ["raidcost", "<wall or door> [how many]", "Explosives and sulfur to raid it", ["rc"], "raidcost armored door 2"],
     ["grecycle", "<item>", "What a monument recycler gives back", [], "grecycle roadsign jacket"],
   ]],
   ["Smart devices", [
     ["switch", "<id> <name>", "Name a smart switch so it can be toggled from chat", [], "switch 12345 turrets", true],
     ["switches", "", "All switches and whether they're on or off"],
-    ["upkeep", "", "How long until your base decays (TC storage monitors)"],
+    ["upkeep", "", "How long until your base decays, and the time it happens (TC storage monitors)"],
+    ["loot", "", "The latest changes in boxes with a storage monitor"],
   ]],
   ["Team and tracking", [
     ["tracked", "", "Which of your tagged players are online"],
@@ -526,6 +536,7 @@ const COMMANDS = [
     ["timer", "<time> <message>", "Post a message after 15s, 20m, 3h or 1h30m", [], "timer 10m bradley up", true],
     ["timers", "", "Running timers"],
     ["raid", "", "Where the last raid was heard, as an estimated grid"],
+    ["raidmode", "[off]", "Run the raid mode switches (set up on the Devices page), or undo them", ["rm"], "raidmode", true],
   ]],
   ["Other", [
     ["help", "", "Post the command list in chat"],
@@ -644,10 +655,16 @@ function renderSettings(force) {
     <h2>Alerts</h2>
     ${row("Windows notifications", `<span>${notifyStatus()}</span>`, "Shown while the RustWatch window is open. Choose which alerts use them in the table below.")}
     ${row("Play a sound in the app", chk("sound"))}
-    ${row("Discord webhook", `<input name="discordWebhook" value="${esc(s.discordWebhook)}" placeholder="https://discord.com/api/webhooks/…" style="width:100%">`, "Server settings → Integrations → Webhooks → New webhook → Copy URL.")}
+    ${row("Discord webhook", `<input name="discordWebhook" value="${esc(s.discordWebhook)}" placeholder="https://discord.com/api/webhooks/…" style="width:100%">`, "Server settings → Integrations → Webhooks → New webhook → Copy URL. Alerts are posted here.")}
     <table class="routes" style="margin-top:10px"><thead><tr><th>Alert</th><th>Desktop</th><th>Team chat</th><th>Discord</th></tr></thead><tbody>
     ${S.alertKinds.map((k) => { const r = s.alerts[k.key] || {}; return `<tr><td>${esc(k.label)}</td>${["desktop", "chat", "discord"].map((c) => `<td><input type="checkbox" data-route="${k.key}" data-ch="${c}" ${r[c] ? "checked" : ""} aria-label="${esc(k.label)} ${c}"></td>`).join("")}</tr>`; }).join("")}
     </tbody></table>
+    <h2>Discord bot</h2>
+    ${row("Status", `<span>${discordStatus()}</span>`)}
+    ${row("Bot token", `<input name="discordBotToken" type="password" value="${esc(s.discordBotToken || "")}" placeholder="optional, from discord.com/developers" style="width:340px" autocomplete="off">`, `Lets your team use RustWatch's commands from Discord. Create an application at <a href="https://discord.com/developers/applications" target="_blank" rel="noopener">discord.com/developers</a>, add a Bot, turn on <b>Message Content Intent</b>, copy its token, and invite it to your Discord with View Channel, Read Message History and Send Messages.`)}
+    ${row("Channel ID", `<input name="discordChannel" value="${esc(s.discordChannel || "")}" placeholder="e.g. 1234567890123456789" style="width:240px">`, "In Discord: Settings → Advanced → Developer Mode on, then right-click the channel → Copy Channel ID.")}
+    ${row("Copy team chat to Discord", chk("discordRelayChat"))}
+    ${row("Post Discord messages in team chat", chk("discordToTeam"), "Messages that aren't commands are posted in game as [Discord] name: message.")}
     <h2 id="updBox">Updates</h2>
     ${updateBox()}
     ${row("Check for updates automatically", `<input type="checkbox" name="autoUpdate" ${s.noUpdateCheck ? "" : "checked"}>`, "Checks GitHub every 6 hours. Updates are only installed when you click Update now.")}
@@ -671,9 +688,9 @@ $("#settingsForm").addEventListener("input", () => { settingsDirty = true; });
 $("#settingsForm").addEventListener("submit", (e) => {
   e.preventDefault();
   const f = e.target, s = structuredClone(S.settings);
-  for (const k of ["chatCommands", "sound", "keepRunning"]) s[k] = f[k].checked;
+  for (const k of ["chatCommands", "sound", "keepRunning", "discordRelayChat", "discordToTeam"]) s[k] = f[k].checked;
   s.noUpdateCheck = !f.autoUpdate.checked;
-  for (const k of ["prefix", "botTag", "bmToken", "steamApiKey", "discordWebhook"]) s[k] = f[k].value.trim();
+  for (const k of ["prefix", "botTag", "bmToken", "steamApiKey", "discordWebhook", "discordBotToken", "discordChannel"]) s[k] = f[k].value.trim();
   for (const k of ["lockedCrateMinutes", "cargoEgressMinutes", "bradleyRespawnMinutes", "afkMinutes", "upkeepAlertHours", "bmPollSeconds"]) s[k] = parseInt(f[k].value) || 0;
   s.eventWindows = s.eventWindows || {};
   for (const fc of S.forecasts || []) { const a = parseFloat(f["ew_" + fc.kind + "_0"]?.value), b = parseFloat(f["ew_" + fc.kind + "_1"]?.value); if (a > 0 && b >= a) s.eventWindows[fc.kind] = [a, b]; }
@@ -681,6 +698,12 @@ $("#settingsForm").addEventListener("submit", (e) => {
   act("/api/settings", s, "Settings saved").then(() => { settingsDirty = false; });
 });
 
+function discordStatus() {
+  const d = S.discord || "off";
+  if (d === "off") return `<span class="pill">Off</span>`;
+  if (d.startsWith("connected")) return `<span class="pill ok">${esc(d)}</span>`;
+  return `<span class="pill bad" style="white-space:normal">${esc(d.replace(/^error: /, ""))}</span>`;
+}
 function updateBox() {
   const u = S.update || {};
   const checked = u.checked ? `checked ${ago(u.checked)}` : "not checked yet";
@@ -730,8 +753,8 @@ $("#timerForm").addEventListener("submit", (e) => {
 /* ---------- map ---------- */
 const GRID = 146.25;
 const MARK = { 1: "Teammate", 2: "Explosion", 3: "Shop", 4: "Chinook", 5: "Cargo ship", 6: "Locked crate", 7: "Event area", 8: "Patrol heli", 9: "Travelling vendor" };
-const layers = { grid: true, monuments: true, team: true, shops: true, events: true, pins: true, raid: true };
-const LAYER_LABEL = { grid: "Grid", monuments: "Monuments", team: "Team", shops: "Shops", events: "Events", pins: "Map pins", raid: "Raid estimate" };
+const layers = { grid: true, monuments: true, team: true, trails: true, deaths: false, shops: true, events: true, pins: true, raid: true };
+const LAYER_LABEL = { grid: "Grid", monuments: "Monuments", team: "Team", trails: "Trails (1h)", deaths: "Team deaths", shops: "Shops", events: "Events", pins: "Map pins", raid: "Raid estimate" };
 const PIN_COLOURS = ["#e9d24a", "#3d8fe0", "#62c25a", "#d9483b", "#c25ad0", "#47c6c9"];
 const mapImg = new Image();
 let mapKey = "";
@@ -815,7 +838,7 @@ class MapView {
     if (mapImg.complete && mapImg.naturalWidth) { ctx.imageSmoothingQuality = "high"; ctx.drawImage(mapImg, this.ox, this.oy, m.width * this.scale, m.height * this.scale); }
     this.hits = [];
     const ms = corrected(m.mapSize);
-    const counts = { shops: (S.vending || []).length, events: (S.markers || []).filter((k) => k.type !== 1).length, pins: (S.notes || []).length };
+    const counts = { shops: (S.vending || []).length, events: (S.markers || []).filter((k) => k.type !== 1).length, pins: (S.notes || []).length, deaths: (S.deaths || []).length };
 
     if (layers.grid) {
       const n = Math.floor(ms / GRID);
@@ -837,6 +860,30 @@ class MapView {
         ctx.fillStyle = "rgba(239,231,214,.95)"; ctx.strokeStyle = "rgba(12,14,16,.9)"; ctx.lineWidth = 1.5; ctx.fillRect(-3.5, -3.5, 7, 7); ctx.strokeRect(-3.5, -3.5, 7, 7); ctx.restore();
         outlinedText(ctx, name, x, y + 4, "#f3ecdc", size);
       }
+    }
+    if (layers.deaths) {
+      const rad = Math.max(10, this.worldPx(60));
+      for (const d of S.deaths || []) {
+        const [x, y] = this.w2s(d.x, d.y);
+        const g = ctx.createRadialGradient(x, y, 0, x, y, rad);
+        g.addColorStop(0, "rgba(229,72,59,.55)"); g.addColorStop(1, "rgba(229,72,59,0)");
+        ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, rad, 0, 7); ctx.fill();
+        ctx.strokeStyle = "#ffb3ab"; ctx.lineWidth = 1.6; ctx.beginPath(); ctx.moveTo(x - 4, y - 4); ctx.lineTo(x + 4, y + 4); ctx.moveTo(x + 4, y - 4); ctx.lineTo(x - 4, y + 4); ctx.stroke();
+        this.hits.push({ x, y, r: 7, tip: () => `<b>${esc(d.name)} died here</b> · ${esc(gridOf(d.x, d.y))}<br>${ago(d.t)}` });
+      }
+    }
+    if (layers.trails) {
+      const cols = ["#7ee0a6", "#7fb4f0", "#f0c46a", "#e58ad8", "#9fe0e0"];
+      (S.trails || []).forEach((tr, i) => {
+        ctx.save(); ctx.strokeStyle = cols[i % cols.length]; ctx.globalAlpha = tr.online ? 0.85 : 0.45; ctx.lineWidth = 2.2; ctx.setLineDash([6, 4]); ctx.lineJoin = "round";
+        ctx.beginPath(); let pen = false;
+        for (const p of tr.points) {
+          if (p[0] < 0) { pen = false; continue; }
+          const [x, y] = this.w2s(p[0], p[1]);
+          if (pen) ctx.lineTo(x, y); else { ctx.moveTo(x, y); pen = true; }
+        }
+        ctx.stroke(); ctx.restore();
+      });
     }
     if (layers.events) for (const mk of S.markers || []) {
       if (mk.type !== 7) continue;

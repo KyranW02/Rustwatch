@@ -52,6 +52,9 @@ type Server struct {
 	jpg             []byte
 	listener        net.Listener
 	Addr            string
+	cams            map[string]*fakeCam
+	camSub          map[*ws.Conn]string
+	camOrder        []int16
 }
 
 func New() *Server {
@@ -84,6 +87,8 @@ func New() *Server {
 		s.vms = append(s.vms, v)
 	}
 	s.jpg = makeMap()
+	s.camSub = map[*ws.Conn]string{}
+	s.camerasInit()
 	return s
 }
 
@@ -144,6 +149,7 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 	defer func() {
 		s.mu.Lock()
 		delete(s.conns, conn)
+		delete(s.camSub, conn)
 		s.mu.Unlock()
 		conn.Close()
 	}()
@@ -205,7 +211,7 @@ func (s *Server) onRequest(conn *ws.Conn, data []byte) {
 		w.String(3, "https://example.com")
 		w.String(4, "Procedural Map")
 		w.Uint(5, uint64(s.MapSize))
-		w.Uint(6, uint64(time.Now().Add(-26*time.Hour).Unix()))
+		w.Uint(6, uint64(s.start.Add(-26*time.Hour).Unix()))
 		w.Uint(7, 147)
 		w.Uint(8, 200)
 		w.Uint(9, 3)
@@ -323,6 +329,8 @@ func (s *Server) onRequest(conn *ws.Conn, data []byte) {
 		}()
 	case 18: // markers
 		resp.Message(13, s.markers())
+	case 30, 31, 32: // cameras
+		s.camRequest(conn, kind, sub, resp)
 	case 20: // promote
 		var id uint64
 		pb.Each(sub, func(f pb.Field) {

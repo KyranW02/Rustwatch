@@ -148,9 +148,16 @@ func (a *App) checkWipeLocked() {
 		return
 	}
 	if a.srv.WipeSeen != a.info.WipeTime {
+		firstSight := a.srv.WipeSeen == 0
 		a.srv.WipeSeen = a.info.WipeTime
 		a.srv.Deaths = map[string]int{}
 		a.srv.StatBase = map[string][2]int64{}
+		if !firstSight { // a real wipe: the map and the boxes are gone
+			a.srv.DeathSpots = nil
+			a.srv.LootLog = nil
+			a.srv.JoinLog = nil
+			a.tracker.activity = nil
+		}
 		a.saveLocked()
 		select {
 		case a.statsPoke <- struct{}{}:
